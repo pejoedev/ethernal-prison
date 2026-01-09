@@ -938,9 +938,9 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                         result,
                     )
                 elif action_type == "write_file":
-                    # Accept both 'path' and 'file_path' for flexibility
-                    path = action.get("path") or action.get("file_path", "")
-                    content = action.get("content", "")
+                    params = action.get("parameters", action)
+                    path = params.get("path") or params.get("file_path", "")
+                    content = params.get("content", "")
                     result = self.files.write_file(path, content)
                     self.logger.log_action(
                         action_type,
@@ -958,16 +958,18 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                         {"path": path},
                         result,
                     )
-                elif action_type == "list_dir":
-                    path = action.get("path", ".")
-                    result = self.files.list_directory(path)
+                elif action_type == "read_file":
+                    params = action.get("parameters", action)
+                    path = params.get("path", "")
+                    result = self.files.read_file(path)
                     self.logger.log_action(
                         action_type,
                         {"path": path},
                         result,
                     )
                 elif action_type == "execute":
-                    command = action.get("command", "")
+                    params = action.get("parameters", action)
+                    command = params.get("command", "")
                     result = self.executor.execute(command)
                     self.logger.log_action(
                         action_type,
