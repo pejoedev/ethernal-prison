@@ -11,16 +11,20 @@ import requests
 
 
 class Logger:
-    """Log agent actions to daily log files"""
+    """Log agent actions to daily log files with organized structure"""
 
     def __init__(self, logs_dir: str = "./logs"):
         self.logs_dir = Path(logs_dir)
+        self.actions_dir = self.logs_dir / "actions"
+        self.responses_dir = self.logs_dir / "responses"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.actions_dir.mkdir(parents=True, exist_ok=True)
+        self.responses_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_log_file(self) -> Path:
+    def _get_log_file(self, subdir: Path) -> Path:
         """Get today's log file path"""
         date_str = datetime.now().strftime("%Y-%m-%d")
-        return self.logs_dir / f"{date_str}.log"
+        return subdir / f"{date_str}.log"
 
     def log_action(
         self, action_type: str, details: dict, result: str = ""
@@ -32,12 +36,22 @@ class Logger:
             "details": details,
             "result_preview": result[:200] if result else "",
         }
-        self._write_log(log_entry)
+        self._write_log(log_entry, self.actions_dir)
 
-    def _write_log(self, entry: dict):
+    def log_response(self, response: str, reasoning: str = ""):
+        """Log AI response and reasoning"""
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "response": response[:500],
+            "reasoning": reasoning[:500],
+            "full_length": len(response),
+        }
+        self._write_log(log_entry, self.responses_dir)
+
+    def _write_log(self, entry: dict, subdir: Path):
         """Write log entry to file"""
         try:
-            log_file = self._get_log_file()
+            log_file = self._get_log_file(subdir)
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
         except Exception as e:
@@ -511,6 +525,19 @@ class AgentLoop:
             pass
         return {}
 
+    def _extract_reasoning(self, response: str) -> str:
+        """Extract reasoning from response if present"""
+        try:
+            start = response.find("{")
+            end = response.rfind("}") + 1
+            if start != -1 and end > start:
+                json_str = response[start:end]
+                data = json.loads(json_str)
+                return data.get("reasoning", "")
+        except json.JSONDecodeError:
+            pass
+        return ""
+
     def _format_help(self) -> str:
         """Generate help message"""
         custom_cmds = self.config.get("allowed_commands", {})
@@ -601,6 +628,8 @@ EXAMPLE PATHS (all safely resolve within sandbox):
         print("Autonomous AI Agent Loop")
         print(f"Sandbox root: {self.files.root}")
         print(f"Logs directory: {self.logger.logs_dir}")
+        print(f"  Actions log: {self.logger.actions_dir}")
+        print(f"  Responses log: {self.logger.responses_dir}")
         print(f"Credits: {self.credits_name}")
         if self.max_iterations:
             print(f"Max iterations: {self.max_iterations}")
@@ -660,6 +689,9 @@ EXAMPLE PATHS (all safely resolve within sandbox):
 
                 print(f"Response:\n{response}\n")
                 self._save_message(response)
+
+                reasoning = self._extract_reasoning(response)
+                self.logger.log_response(response, reasoning)
 
                 action = self._parse_action(response)
 
