@@ -1,18 +1,47 @@
-#!/usr/bin/env python3
-"""
-Autonomous AI Agent Loop with Sandboxed File/Command Execution
-Uses LM Studio's OpenAI-compatible endpoints for local model queries
-"""
-
 import json
 import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 import requests
+
+
+class Logger:
+    """Log agent actions to daily log files"""
+
+    def __init__(self, logs_dir: str = "./logs"):
+        self.logs_dir = Path(logs_dir)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_log_file(self) -> Path:
+        """Get today's log file path"""
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        return self.logs_dir / f"{date_str}.log"
+
+    def log_action(
+        self, action_type: str, details: dict, result: str = ""
+    ):
+        """Log an action with details"""
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "action_type": action_type,
+            "details": details,
+            "result_preview": result[:200] if result else "",
+        }
+        self._write_log(log_entry)
+
+    def _write_log(self, entry: dict):
+        """Write log entry to file"""
+        try:
+            log_file = self._get_log_file()
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            print(f"Logging error: {e}")
 
 
 class AgentConfig:
@@ -74,17 +103,13 @@ class FileManager:
 
     def __init__(self, root: str, max_size_mb: int = 10):
         self.root = Path(root).resolve()
-        # Create sandbox directory if it doesn't exist
         self.root.mkdir(parents=True, exist_ok=True)
         self.max_bytes = max_size_mb * 1024 * 1024
 
     def _sanitize_path(self, filepath: str) -> str:
         """Remove dangerous path components"""
-        # Remove leading slashes
         filepath = filepath.lstrip("/")
-        # Remove ./ and ../
         filepath = filepath.replace("./", "").replace("../", "")
-        # Remove standalone . and ..
         filepath = filepath.replace("\\", "/")
         parts = filepath.split("/")
         parts = [p for p in parts if p and p != "." and p != ".."]
@@ -92,11 +117,9 @@ class FileManager:
 
     def _validate_path(self, filepath: str) -> Path:
         """Ensure path is within root directory"""
-        # Sanitize the path first
         sanitized = self._sanitize_path(filepath)
         target = (self.root / sanitized).resolve()
 
-        # Final check: ensure target is within root
         if not str(target).startswith(str(self.root)):
             raise ValueError(
                 f"Path escape attempt detected: {filepath} "
@@ -153,7 +176,6 @@ class FileManager:
             if not items:
                 return f"[empty directory]"
 
-            # Build formatted listing with file sizes
             listing = []
             for item in items:
                 if item.is_dir():
@@ -216,8 +238,6 @@ class CommandExecutor:
         command_lower = command.lower().strip()
         for prefix in self.allowed_prefixes:
             if command_lower.startswith(prefix):
-                # Ensure it's a complete command word
-                # (e.g., "npm" matches "npm install" but not "npmd")
                 remainder = command_lower[len(prefix) :]
                 if not remainder or remainder[0] in (" ", "\t"):
                     return True
@@ -228,7 +248,6 @@ class CommandExecutor:
         if not command or not command.strip():
             return "Error: Empty command"
 
-        # Check for forbidden patterns
         if self._check_forbidden_patterns(command):
             return (
                 "Error: Forbidden pattern detected. "
@@ -236,11 +255,9 @@ class CommandExecutor:
                 "(``, $()) are not allowed."
             )
 
-        # Check if it's a custom command (explicit aliases)
         for alias, template in self.custom_commands.items():
             if command.startswith(alias):
                 remainder = command[len(alias) :].strip()
-                # Only match if it's a complete command word
                 if not command[len(alias) :] or command[len(alias)] in (
                     " ",
                     "\t",
@@ -252,9 +269,7 @@ class CommandExecutor:
                     )
                     break
 
-        # Check if it's an allowed prefix command
         if not self._check_allowed_prefix(command):
-            # Not a custom command and not an allowed prefix
             available = ", ".join(
                 list(self.custom_commands.keys())
                 + self.allowed_prefixes
@@ -333,6 +348,7 @@ class AgentLoop:
             self.config.get("api_endpoint", "http://localhost:1234/v1"),
             self.config.get("model", "openai/gpt-oss-20b"),
         )
+        self.logger = Logger()
         self.history_file = Path(sandbox_root) / ".agent_history"
         self.last_message = self._load_last_message()
 
@@ -350,21 +366,17 @@ class AgentLoop:
         """Build context string with current state"""
         context = "=== AGENT CONTEXT ===\n\n"
 
-        # Add last message if available
         if self.last_message:
             context += f"Last message:\n{self.last_message}\n\n"
 
-        # Add README
         readme = self.files.read_file("README.md")
         if not readme.startswith("Error"):
             context += f"README.md:\n{readme}\n\n"
 
-        # Add TO-DO
         todo = self.files.read_file("TODO.md")
         if not todo.startswith("Error"):
             context += f"TODO.md:\n{todo}\n\n"
 
-        # Add directory listing
         context += f"Current directory:\n{self.files.show_directory()}\n"
 
         return context
@@ -372,7 +384,6 @@ class AgentLoop:
     def _parse_action(self, response: str) -> dict:
         """Parse JSON action from response"""
         try:
-            # Try to extract JSON from response
             start = response.find("{")
             end = response.rfind("}") + 1
             if start != -1 and end > start:
@@ -393,9 +404,11 @@ You are an autonomous agent with access to file and command execution.
 Always respond with valid JSON containing an 'action' field.
 If you do not know what to do, respond with {"action": "help"}.
 
-You will be here with enough time to be as perfectionistic as you want to be. 
+You will be here with enough time to be as perfectionistic as you want to
+ be. 
 You can also choose to improve the thing you are making where you see fit. 
-You are the developer, and have full creative ownership over what you make, the process, the result etc.
+You are the developer, and have full creative ownership over what you make,
+ the process, the result etc.
 Only requirement, is to see the task given as the minimal required product.
 
 AVAILABLE ACTIONS:
@@ -450,9 +463,8 @@ EXAMPLE PATHS (all safely resolve within sandbox):
     def run(self):
         """Main agent loop"""
         print("Autonomous AI Agent Loop")
-        print(
-            f"Sandbox root: {self.files.root}"
-        )
+        print(f"Sandbox root: {self.files.root}")
+        print(f"Logs directory: {self.logger.logs_dir}")
         print("Press Ctrl+C to exit\n")
 
         context = self._build_context()
@@ -476,7 +488,6 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                 iteration += 1
                 print(f"\n--- Iteration {iteration} ---")
 
-                # Get response from LM Studio
                 response = self.client.chat(
                     messages,
                     temperature=self.config.get("temperature", 0.7),
@@ -490,58 +501,101 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                 print(f"Response:\n{response}\n")
                 self._save_message(response)
 
-                # Parse and execute action
                 action = self._parse_action(response)
 
                 if not action:
-                    # Didn't get JSON, ask for help
                     action = {"action": "help"}
 
                 action_type = action.get("action", "help").lower()
 
+                # Execute action and capture result
                 if action_type == "read_file":
-                    result = self.files.read_file(action.get("path", ""))
+                    path = action.get("path", "")
+                    result = self.files.read_file(path)
+                    self.logger.log_action(
+                        action_type,
+                        {"path": path},
+                        result,
+                    )
                 elif action_type == "write_file":
-                    result = self.files.write_file(
-                        action.get("path", ""),
-                        action.get("content", ""),
+                    path = action.get("path", "")
+                    content = action.get("content", "")
+                    result = self.files.write_file(path, content)
+                    self.logger.log_action(
+                        action_type,
+                        {
+                            "path": path,
+                            "content_length": len(content),
+                        },
+                        result,
                     )
                 elif action_type == "show_dir":
-                    result = self.files.show_directory(
-                        action.get("path", ".")
+                    path = action.get("path", ".")
+                    result = self.files.show_directory(path)
+                    self.logger.log_action(
+                        action_type,
+                        {"path": path},
+                        result,
                     )
                 elif action_type == "list_dir":
-                    result = self.files.list_directory(
-                        action.get("path", ".")
+                    path = action.get("path", ".")
+                    result = self.files.list_directory(path)
+                    self.logger.log_action(
+                        action_type,
+                        {"path": path},
+                        result,
                     )
                 elif action_type == "execute":
-                    result = self.executor.execute(
-                        action.get("command", "")
+                    command = action.get("command", "")
+                    result = self.executor.execute(command)
+                    self.logger.log_action(
+                        action_type,
+                        {"command": command},
+                        result,
                     )
                 elif action_type == "think":
-                    result = f"Thought: {action.get('message', '')}"
+                    message = action.get("message", "")
+                    result = f"Thought: {message}"
+                    self.logger.log_action(
+                        action_type,
+                        {"message": message},
+                        result,
+                    )
                 elif action_type == "help":
                     result = self._format_help()
+                    self.logger.log_action(
+                        action_type,
+                        {},
+                        result,
+                    )
                 else:
                     result = f"Unknown action: {action_type}"
+                    self.logger.log_action(
+                        "unknown",
+                        {"requested_action": action_type},
+                        result,
+                    )
 
                 print(f"Result:\n{result}\n")
 
-                # Add to message history for next iteration
                 messages.append({"role": "assistant", "content": response})
                 messages.append({"role": "user", "content": result})
 
-                # Keep history reasonable (last 6 exchanges = 12 messages)
                 if len(messages) > 14:
                     messages = messages[:2] + messages[-12:]
 
-                time.sleep(1)  # Prevent hammering the API
+                time.sleep(1)
 
             except KeyboardInterrupt:
                 print("\nExiting agent loop")
                 break
             except Exception as e:
                 print(f"Error in loop: {e}")
+                self.logger.log_action(
+                    "error",
+                    {"error_message": str(e)},
+                    str(e),
+                )
                 time.sleep(2)
 
 

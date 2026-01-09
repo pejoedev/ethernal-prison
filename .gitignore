@@ -210,3 +210,4 @@ __marimo__/
 .idea/
 sandbox/
 .agent_history
+logs/
