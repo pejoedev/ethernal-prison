@@ -131,8 +131,7 @@ class AgentConfig:
                     "&&",
                     ";",
                     "`",
-                    "$(",
-                ],
+                    "$(", ],
             }
             self._save_config(default)
             return default
@@ -239,7 +238,9 @@ class FileManager:
                         size_str = f"{size / 1024:.1f}KB"
                     else:
                         size_str = f"{size / (1024 * 1024):.1f}MB"
-                    listing.append(f"[FILE] {item.name} ({size_str})")
+                    listing.append(
+                        f"[FILE] {item.name} ({size_str})"
+                    )
 
             return "\n".join(listing)
         except Exception as e:
@@ -273,7 +274,9 @@ class CommandExecutor:
         self.root = Path(root).resolve()
         self.forbidden = config.get("forbidden_patterns", [])
         self.custom_commands = config.get("allowed_commands", {})
-        self.allowed_prefixes = config.get("allowed_command_prefixes", [])
+        self.allowed_prefixes = config.get(
+            "allowed_command_prefixes", []
+        )
 
     def _check_forbidden_patterns(self, command: str) -> bool:
         """Check if command contains forbidden patterns"""
@@ -307,9 +310,10 @@ class CommandExecutor:
         for alias, template in self.custom_commands.items():
             if command.startswith(alias):
                 remainder = command[len(alias) :].strip()
-                if not command[len(alias) :] or command[
-                    len(alias)
-                ] in (" ", "\t"):
+                if (
+                    not command[len(alias) :]
+                    or command[len(alias)] in (" ", "\t")
+                ):
                     command = (
                         template.format(remainder)
                         if remainder
@@ -319,9 +323,12 @@ class CommandExecutor:
 
         if not self._check_allowed_prefix(command):
             available = ", ".join(
-                list(self.custom_commands.keys()) + self.allowed_prefixes
+                list(self.custom_commands.keys())
+                + self.allowed_prefixes
             )
-            return f"Error: Command not allowed. Available: {available}"
+            return (
+                f"Error: Command not allowed. Available: {available}"
+            )
 
         try:
             result = subprocess.run(
@@ -341,7 +348,7 @@ class CommandExecutor:
 
 
 class LMStudioClient:
-    """Client for LM Studio's OpenAI-compatible API"""
+    """Client for LM Studio's OpenAI-compatible API with tool use"""
 
     def __init__(
         self,
@@ -366,7 +373,9 @@ class LMStudioClient:
         """Estimate total tokens in messages"""
         total = 0
         for msg in messages:
-            total += self._estimate_tokens(msg.get("content", ""))
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                total += self._estimate_tokens(content)
         return total
 
     def _trim_messages(
@@ -388,18 +397,181 @@ class LMStudioClient:
 
         return trimmed
 
+    def get_tools(self) -> list:
+        """Define available tools for the AI"""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read the content of a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path to the file to read",
+                            }
+                        },
+                        "required": ["path"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "description": "Write content to a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path to the file",
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "Content to write",
+                            },
+                        },
+                        "required": ["path", "content"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "show_dir",
+                    "description": "Show directory contents with details",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": (
+                                    "Directory path (default: current "
+                                    "directory)"
+                                ),
+                            }
+                        },
+                        "required": [],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_dir",
+                    "description": "List directory contents",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": (
+                                    "Directory path (default: current "
+                                    "directory)"
+                                ),
+                            }
+                        },
+                        "required": [],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "execute",
+                    "description": (
+                        "Execute whitelisted commands (npm, git, npx)"
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "Command to execute",
+                            }
+                        },
+                        "required": ["command"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "think",
+                    "description": "Record your reasoning and thoughts",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "message": {
+                                "type": "string",
+                                "description": "Your thoughts",
+                            }
+                        },
+                        "required": ["message"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "submit_feedback",
+                    "description": (
+                        "Submit feedback for improvements"
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "message": {
+                                "type": "string",
+                                "description": "Feedback text",
+                            }
+                        },
+                        "required": ["message"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "request_command",
+                    "description": "Request a new command to be added",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command_name": {
+                                "type": "string",
+                                "description": "Alias for the command",
+                            },
+                            "command_template": {
+                                "type": "string",
+                                "description": (
+                                    "Command template with {} for args"
+                                ),
+                            },
+                        },
+                        "required": [
+                            "command_name",
+                            "command_template",
+                        ],
+                    },
+                },
+            },
+        ]
+
     def chat(
         self,
         messages: list,
         temperature: float = 0.7,
         max_tokens: int = 2000,
         max_prompt_tokens: int = 3000,
-    ) -> Optional[str]:
-        """Send chat completion request with error handling"""
+    ) -> Optional[dict]:
+        """Send chat completion request with tool use support"""
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         messages = self._trim_messages(messages, max_prompt_tokens)
-
         self.retry_count = 0
 
         while self.retry_count < self.max_retries:
@@ -411,13 +583,15 @@ class LMStudioClient:
                         "messages": messages,
                         "temperature": temperature,
                         "max_tokens": max_tokens,
+                        "tools": self.get_tools(),
+                        "tool_choice": "auto",
                     },
                     timeout=120,
                 )
                 response.raise_for_status()
                 data = response.json()
                 self.retry_count = 0
-                return data["choices"][0]["message"]["content"]
+                return data["choices"][0]["message"]
 
             except requests.exceptions.HTTPError as e:
                 error_msg = str(e)
@@ -430,7 +604,9 @@ class LMStudioClient:
                     print(
                         f"\n[{current_time}] Context overflow detected"
                     )
-                    print("Trimming message history and retrying...")
+                    print(
+                        "Trimming message history and retrying..."
+                    )
 
                     if self.logger:
                         self.logger.log_error(
@@ -543,62 +719,61 @@ class LMStudioClient:
 
 
 class CommandReviewer:
-    """Reviews unknown commands and provides suggestions"""
+    """Reviews unknown tool calls and provides suggestions"""
 
-    def __init__(self, client: LMStudioClient, logger: Optional[Logger] = None):
+    def __init__(
+        self,
+        client: LMStudioClient,
+        logger: Optional[Logger] = None,
+        sandbox_root: str = "./sandbox",
+    ):
         self.client = client
         self.logger = logger
-        self.script_path = Path(__file__).resolve()
+        self.reviewer_instructions = (
+            Path(sandbox_root) / "reviewer.txt"
+        )
 
-    def _get_script_content(self) -> str:
-        """Read the current script file"""
-        try:
-            return self.script_path.read_text(encoding="utf-8")
-        except Exception as e:
-            return f"Error reading script: {e}"
+    def _get_reviewer_instructions(self) -> str:
+        """Load reviewer instructions from file"""
+        if self.reviewer_instructions.exists():
+            try:
+                return self.reviewer_instructions.read_text(
+                    encoding="utf-8"
+                )
+            except Exception as e:
+                return f"Error reading reviewer.txt: {e}"
+        return (
+            "Review the unknown tool call and explain what went wrong. "
+            "Provide the correct tool name and parameters format."
+        )
 
-    def review_command(self, action_data: dict, full_response: str) -> str:
-        """Review an unknown command and provide suggestions"""
-        script_content = self._get_script_content()
+    def review_command(
+        self, tool_call: dict, full_response: str
+    ) -> str:
+        """Review an unknown tool call"""
+        instructions = self._get_reviewer_instructions()
 
-        review_prompt = f"""You are a command reviewer AI. A main AI agent tried to execute a command that was not recognized.
+        review_prompt = f"""You are a command reviewer AI. A main AI agent tried to use a tool that failed.
 
-=== MAIN AGENT'S FULL RESPONSE ===
+=== MAIN AGENT'S RESPONSE ===
 {full_response}
 
-=== PARSED ACTION DATA ===
-{json.dumps(action_data, indent=2)}
+=== FAILED TOOL CALL ===
+{json.dumps(tool_call, indent=2)}
 
-=== COMPLETE AGENT SYSTEM CODE ===
-{script_content}
+=== REVIEWER INSTRUCTIONS ===
+{instructions}
 
 === YOUR TASK ===
-Analyze why this command failed and provide:
-1. What the main AI was trying to do
-2. What went wrong (why the action is unknown)
-3. The correct action format they should have used
-4. A concrete example of the correct JSON format
-
-The available actions are:
-- read_file: Read a file
-- write_file: Write/create a file
-- show_dir: Show directory with details
-- list_dir: List directory contents
-- execute: Run whitelisted commands (npm, git, npx)
-- think: Record reasoning
-- submit_feedback: Request improvements
-- request_command: Request new command
-- list_commands: See available commands
-- help: Show help message
-
-Respond with a clear, concise explanation and suggestion."""
+Analyze what went wrong and provide a clear, actionable suggestion for fixing it.
+Be concise and helpful."""
 
         messages = [
             {
                 "role": "system",
                 "content": (
                     "You are a helpful command reviewer. "
-                    "Analyze unknown commands and provide clear, "
+                    "Analyze failed tool calls and provide clear, "
                     "actionable suggestions."
                 ),
             },
@@ -606,14 +781,20 @@ Respond with a clear, concise explanation and suggestion."""
         ]
 
         try:
-            review = self.client.chat(
-                messages, temperature=0.3, max_tokens=800, max_prompt_tokens=8000
+            response = self.client.chat(
+                messages,
+                temperature=0.3,
+                max_tokens=800,
+                max_prompt_tokens=8000,
             )
 
-            if review and self.logger:
-                self.logger.log_review(json.dumps(action_data), review)
+            if response and self.logger:
+                content = response.get("content", "")
+                self.logger.log_review(
+                    json.dumps(tool_call), content
+                )
 
-            return review or "Unable to generate review"
+            return response.get("content", "Unable to generate review")
         except Exception as e:
             return f"Error generating review: {e}"
 
@@ -632,7 +813,9 @@ class FeedbackManager:
         """Submit feedback from AI"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            feedback_file = self.feedback_dir / f"feedback_{timestamp}.txt"
+            feedback_file = (
+                self.feedback_dir / f"feedback_{timestamp}.txt"
+            )
             feedback_file.write_text(feedback_text, encoding="utf-8")
             return (
                 f"Feedback submitted: {feedback_file.name}. "
@@ -648,14 +831,17 @@ class FeedbackManager:
         """Request a new command to be added"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            request_file = self.requests_dir / f"request_{timestamp}.json"
+            request_file = (
+                self.requests_dir / f"request_{timestamp}.json"
+            )
             request_data = {
                 "timestamp": datetime.now().isoformat(),
                 "command_name": command_name,
                 "command_template": command_template,
             }
             request_file.write_text(
-                json.dumps(request_data, indent=2), encoding="utf-8"
+                json.dumps(request_data, indent=2),
+                encoding="utf-8",
             )
             return (
                 f"Command request submitted: {request_file.name}. "
@@ -715,7 +901,9 @@ class AgentLoop:
             context_window=self.config.get("context_window", 4096),
             logger=self.logger,
         )
-        self.reviewer = CommandReviewer(self.client, self.logger)
+        self.reviewer = CommandReviewer(
+            self.client, self.logger, sandbox_root
+        )
         self.feedback_manager = FeedbackManager(sandbox_root)
         self.history_file = Path(sandbox_root) / ".agent_history"
         self.last_message = self._load_last_message()
@@ -753,113 +941,116 @@ class AgentLoop:
 
         return context
 
-    def _parse_action(self, response: str) -> dict:
-        """Parse JSON action from response"""
-        try:
-            start = response.find("{")
-            end = response.rfind("}") + 1
-            if start != -1 and end > start:
-                json_str = response[start:end]
-                return json.loads(json_str)
-        except json.JSONDecodeError:
-            pass
-        return {}
+    def _serialize_response(self, response: dict) -> str:
+        """Serialize response dict to string for logging"""
+        return json.dumps(response, indent=2)
 
-    def _extract_reasoning(self, response: str) -> str:
-        """Extract reasoning from response if present"""
-        try:
-            start = response.find("{")
-            end = response.rfind("}") + 1
-            if start != -1 and end > start:
-                json_str = response[start:end]
-                data = json.loads(json_str)
-                return data.get("reasoning", "")
-        except json.JSONDecodeError:
-            pass
-        return ""
+    def _execute_tool(self, tool_name: str, tool_input: dict) -> str:
+        """Execute a tool call"""
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    def _format_help(self) -> str:
-        """Generate help message"""
-        custom_cmds = self.config.get("allowed_commands", {})
-        prefixes = self.config.get("allowed_command_prefixes", [])
+        if tool_name == "read_file":
+            path = tool_input.get("path", "")
+            result = self.files.read_file(path)
+            self.logger.log_action(
+                tool_name, {"path": path}, result
+            )
+            return result
 
-        help_text = f"""
-=== AGENT HELP ===
-You are an autonomous agent with file and command execution access.
-ALWAYS respond with valid JSON containing 'action' and 'reasoning'.
+        elif tool_name == "write_file":
+            path = tool_input.get("path", "")
+            content = tool_input.get("content", "")
+            result = self.files.write_file(path, content)
+            self.logger.log_action(
+                tool_name,
+                {"path": path, "content_length": len(content)},
+                result,
+            )
+            return result
 
-CREDITS: {self.credits_name}
+        elif tool_name == "show_dir":
+            path = tool_input.get("path", ".")
+            result = self.files.show_directory(path)
+            self.logger.log_action(
+                tool_name, {"path": path}, result
+            )
+            return result
 
-=== AVAILABLE ACTIONS (Only these work) ===
+        elif tool_name == "list_dir":
+            path = tool_input.get("path", ".")
+            result = self.files.list_directory(path)
+            self.logger.log_action(
+                tool_name, {"path": path}, result
+            )
+            return result
 
-1. read_file - Read file content
-   {{"action": "read_file", "path": "path/to/file", "reasoning": "why"}}
+        elif tool_name == "execute":
+            command = tool_input.get("command", "")
+            result = self.executor.execute(command)
+            self.logger.log_action(
+                tool_name, {"command": command}, result
+            )
+            return result
 
-2. write_file - Write/create file
-   {{"action": "write_file", "path": "path/to/file", "content": "file content", "reasoning": "why"}}
+        elif tool_name == "think":
+            message = tool_input.get("message", "")
+            result = f"Noted: {message}"
+            self.logger.log_action(
+                tool_name, {"message": message}, result
+            )
+            return result
 
-3. show_dir - Show directory with details
-   {{"action": "show_dir", "path": ".", "reasoning": "why"}}
+        elif tool_name == "submit_feedback":
+            message = tool_input.get("message", "")
+            result = self.feedback_manager.submit_feedback(message)
+            self.logger.log_action(
+                tool_name, {"message": message}, result
+            )
+            return result
 
-4. list_dir - List directory contents
-   {{"action": "list_dir", "path": ".", "reasoning": "why"}}
+        elif tool_name == "request_command":
+            cmd_name = tool_input.get("command_name", "")
+            cmd_template = tool_input.get("command_template", "")
+            result = self.feedback_manager.request_command(
+                cmd_name, cmd_template
+            )
+            self.logger.log_action(
+                tool_name,
+                {
+                    "command_name": cmd_name,
+                    "command_template": cmd_template,
+                },
+                result,
+            )
+            return result
 
-5. execute - Run whitelisted commands
-   {{"action": "execute", "command": "npm install", "reasoning": "why"}}
+        else:
+            result = (
+                f"❌ UNKNOWN TOOL: '{tool_name}'\n\n"
+                f"Available tools:\n"
+                f"- read_file\n"
+                f"- write_file\n"
+                f"- show_dir\n"
+                f"- list_dir\n"
+                f"- execute\n"
+                f"- think\n"
+                f"- submit_feedback\n"
+                f"- request_command"
+            )
 
-6. think - Record your reasoning
-   {{"action": "think", "message": "your thoughts", "reasoning": "why"}}
+            review = self.reviewer.review_command(
+                {"tool": tool_name, "input": tool_input},
+                f"Tool call attempt: {tool_name}",
+            )
 
-7. submit_feedback - Request improvements
-   {{"action": "submit_feedback", "message": "feedback text", "reasoning": "why"}}
+            result += f"\n\n=== AI REVIEWER ANALYSIS ===\n{review}"
 
-8. request_command - Request new command
-   {{"action": "request_command", "command_name": "alias", "command_template": "command {{}}", "reasoning": "why"}}
-
-9. list_commands - See all available commands
-   {{"action": "list_commands", "reasoning": "why"}}
-
-10. help - Show this message
-    {{"action": "help", "reasoning": "why"}}
-
-=== CUSTOM COMMAND ALIASES ===
-Use these with execute action:
-"""
-        for alias, template in custom_cmds.items():
-            help_text += f"  • {alias}\n    Template: {template}\n"
-
-        help_text += "\n=== ALLOWED COMMAND PREFIXES ===\nAny command starting with these is allowed:\n"
-        for prefix in prefixes:
-            help_text += f"  • {prefix}\n"
-
-        help_text += """
-=== EXAMPLE WORKFLOWS ===
-
-Setup project:
-  {{"action": "execute", "command": "npm install", "reasoning": "Install dependencies"}}
-  {{"action": "write_file", "path": "package.json", "content": "{{}}", "reasoning": "Create config"}}
-  {{"action": "execute", "command": "npm run build", "reasoning": "Build project"}}
-
-Git workflow:
-  {{"action": "execute", "command": "git status", "reasoning": "Check repo status"}}
-  {{"action": "execute", "command": "git add .", "reasoning": "Stage all changes"}}
-  {{"action": "execute", "command": "git commit -m 'initial commit'", "reasoning": "Commit changes"}}
-
-File operations:
-  {{"action": "show_dir", "path": ".", "reasoning": "Check directory contents"}}
-  {{"action": "read_file", "path": "README.md", "reasoning": "Read documentation"}}
-  {{"action": "write_file", "path": "src/index.js", "content": "console.log('hello');", "reasoning": "Create entry point"}}
-
-=== IMPORTANT RULES ===
-✓ Only use actions listed above
-✓ Always include "action" and "reasoning" in JSON
-✓ Path must be relative, no leading /
-✓ Use execute action to run npm, git, npx commands
-✓ Content in write_file can be multiline with \\n
-✓ Check commands with list_commands if unsure
-✓ If your action is "unknown", read the review carefully and fix your format
-"""
-        return help_text
+            self.logger.log_action(
+                "unknown_tool",
+                {"requested_tool": tool_name},
+                result,
+            )
+            return result
 
     def run(self):
         """Main agent loop"""
@@ -876,17 +1067,15 @@ File operations:
             {
                 "role": "system",
                 "content": (
-                    "You are an autonomous AI agent working on a project. "
-                    "CRITICAL: You are NEVER done. Always look for improvements. "
-                    "The task description is the MINIMUM requirement. "
-                    "After completing it, refactor, optimize, add features, "
-                    "improve documentation, add tests, enhance security. "
-                    "Use git to track ALL progress with descriptive commits. "
-                    "Respond only with valid JSON containing 'action', "
-                    "'reasoning', and 'next_steps' fields. "
-                    "Example: {\"action\": \"execute\", "
-                    "\"reasoning\": \"why\", \"next_steps\": \"what's next\"} "
-                    "Be ambitious. Make the project excellent."
+                    "You are an autonomous AI agent with access to tools. "
+                    "CRITICAL: You are NEVER done. Always look for "
+                    "improvements. The task description is the MINIMUM "
+                    "requirement. After completing it, refactor, optimize, "
+                    "add features, improve documentation, add tests, "
+                    "enhance security. Use git to track ALL progress with "
+                    "descriptive commits. Use the available tools to "
+                    "accomplish your goals. Be ambitious and make the "
+                    "project excellent."
                 ),
             },
             {"role": "user", "content": context},
@@ -896,11 +1085,17 @@ File operations:
         while True:
             try:
                 iteration += 1
-                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                current_time = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
 
-                if self.max_iterations and iteration > self.max_iterations:
+                if (
+                    self.max_iterations
+                    and iteration > self.max_iterations
+                ):
                     print(
-                        f"\n[{current_time}] Reached max iterations. Exiting."
+                        f"\n[{current_time}] Reached max iterations. "
+                        f"Exiting."
                     )
                     break
 
@@ -917,137 +1112,77 @@ File operations:
 
                 if response is None:
                     print(
-                        f"[{current_time}] Failed to get response. Retrying..."
+                        f"[{current_time}] Failed to get response. "
+                        f"Retrying..."
                     )
                     time.sleep(5)
                     continue
 
-                print(f"Response:\n{response}\n")
-                self._save_message(response)
+                response_str = self._serialize_response(response)
+                print(f"Response:\n{response_str}\n")
+                self._save_message(response_str)
 
-                reasoning = self._extract_reasoning(response)
-                self.logger.log_response(response, reasoning)
-
-                action = self._parse_action(response)
-
-                if not action:
-                    action = {"action": "none"}
-
-                action_type = action.get("action", "help").lower()
-
-                # Execute action
-                if action_type == "read_file":
-                    path = action.get("path", "")
-                    result = self.files.read_file(path)
-                    self.logger.log_action(action_type, {"path": path}, result)
-                elif action_type == "write_file":
-                    params = action.get("parameters", action)
-                    path = params.get("path") or params.get("file_path", "")
-                    content = params.get("content", "")
-                    result = self.files.write_file(path, content)
-                    self.logger.log_action(
-                        action_type,
-                        {"path": path, "content_length": len(content)},
-                        result,
-                    )
-                elif action_type == "show_dir":
-                    path = action.get("path", ".")
-                    result = self.files.show_directory(path)
-                    self.logger.log_action(action_type, {"path": path}, result)
-                elif action_type == "list_dir":
-                    path = action.get("path", ".")
-                    result = self.files.list_directory(path)
-                    self.logger.log_action(action_type, {"path": path}, result)
-                elif action_type == "execute":
-                    params = action.get("parameters", action)
-                    command = params.get("command", "")
-                    result = self.executor.execute(command)
-                    self.logger.log_action(
-                        action_type, {"command": command}, result
-                    )
-                elif action_type == "think":
-                    message = action.get("message", "")
-                    result = f"Noted: {message}"
-                    self.logger.log_action(
-                        action_type, {"message": message}, result
-                    )
-                elif action_type == "submit_feedback":
-                    message = action.get("message", "")
-                    result = self.feedback_manager.submit_feedback(message)
-                    self.logger.log_action(
-                        action_type, {"message": message}, result
-                    )
-                elif action_type == "request_command":
-                    cmd_name = action.get("command_name", "")
-                    cmd_template = action.get("command_template", "")
-                    result = self.feedback_manager.request_command(
-                        cmd_name, cmd_template
-                    )
-                    self.logger.log_action(
-                        action_type,
-                        {
-                            "command_name": cmd_name,
-                            "command_template": cmd_template,
-                        },
-                        result,
-                    )
-                elif action_type == "help":
-                    result = self._format_help()
-                    self.logger.log_action(action_type, {}, result)
-                elif action_type == "list_commands":
-                    custom_cmds = self.config.get("allowed_commands", {})
-                    prefixes = self.config.get("allowed_command_prefixes", [])
-
-                    result = "=== AVAILABLE ACTIONS ===\n"
-                    result += "read_file, write_file, show_dir, list_dir, execute, "
-                    result += "think, submit_feedback, request_command, list_commands, help\n\n"
-
-                    result += "=== CUSTOM COMMAND ALIASES ===\n"
-                    for alias, template in custom_cmds.items():
-                        result += f"{alias}: {template}\n"
-
-                    result += "\n=== ALLOWED COMMAND PREFIXES ===\n"
-                    for prefix in prefixes:
-                        result += f"{prefix}\n"
-
-                    self.logger.log_action(action_type, {}, result)
-                else:
-                    # Unknown action - trigger review
-                    print(
-                        f"\n[{current_time}] Unknown action detected: "
-                        f"{action_type}"
-                    )
-                    print("Requesting command review from AI...\n")
-
-                    review = self.reviewer.review_command(action, response)
-
-                    result = (
-                        f"❌ UNKNOWN ACTION: '{action_type}'\n\n"
-                        f"=== AI REVIEWER ANALYSIS ===\n{review}\n\n"
-                        f"Please use the suggested format and try again. "
-                        f"Type {{'action': 'help'}} to see all available actions."
-                    )
-
-                    self.logger.log_action(
-                        "unknown", {"requested_action": action_type}, result
-                    )
-
-                print(f"Result:\n{result}\n")
+                content = response.get("content", "")
+                self.logger.log_response(content, "")
 
                 messages.append({"role": "assistant", "content": response})
-                messages.append({"role": "user", "content": result})
 
-                if len(messages) > 14:
-                    messages = messages[:2] + messages[-12:]
+                tool_calls = response.get("tool_calls", [])
+
+                if tool_calls:
+                    for tool_call in tool_calls:
+                        func = tool_call.get("function", {})
+                        tool_name = func.get("name", "")
+                        tool_input = {}
+                        try:
+                            tool_input = json.loads(
+                                func.get("arguments", "{}")
+                            )
+                        except json.JSONDecodeError:
+                            pass
+
+                        result = self._execute_tool(
+                            tool_name, tool_input
+                        )
+                        print(f"Tool: {tool_name}")
+                        print(f"Input: {json.dumps(tool_input)}")
+                        print(f"Result:\n{result}\n")
+
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"Tool '{tool_name}' result:\n{result}"
+                                ),
+                            }
+                        )
+                else:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Please use the available tools to "
+                                "accomplish your goals. Call a tool to "
+                                "proceed."
+                            ),
+                        }
+                    )
+
+                if len(messages) > 20:
+                    messages = messages[:2] + messages[-18:]
 
                 time.sleep(1)
 
             except KeyboardInterrupt:
-                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                current_time = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
                 print(f"\n[{current_time}] Exiting agent loop")
                 break
             except Exception as e:
-                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                current_time = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
                 print(f"[{current_time}] Error: {e}")
                 self.logger.log_error(
                     "loop_error", str(e), {"iteration": iteration}
