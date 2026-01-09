@@ -209,3 +209,4 @@ __marimo__/
 # custom
 .idea/
 sandbox/
+.agent_history
