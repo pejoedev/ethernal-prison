@@ -18,19 +18,19 @@ class Logger:
         self.actions_dir = self.logs_dir / "actions"
         self.responses_dir = self.logs_dir / "responses"
         self.errors_dir = self.logs_dir / "errors"
+        self.reviews_dir = self.logs_dir / "reviews"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.actions_dir.mkdir(parents=True, exist_ok=True)
         self.responses_dir.mkdir(parents=True, exist_ok=True)
         self.errors_dir.mkdir(parents=True, exist_ok=True)
+        self.reviews_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_log_file(self, subdir: Path) -> Path:
         """Get today's log file path"""
         date_str = datetime.now().strftime("%Y-%m-%d")
         return subdir / f"{date_str}.log"
 
-    def log_action(
-        self, action_type: str, details: dict, result: str = ""
-    ):
+    def log_action(self, action_type: str, details: dict, result: str = ""):
         """Log an action with details"""
         log_entry = {
             "timestamp": datetime.now().isoformat(),
@@ -59,6 +59,15 @@ class Logger:
             "context": context,
         }
         self._write_log(log_entry, self.errors_dir)
+
+    def log_review(self, original_action: str, review: str):
+        """Log command reviews"""
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "original_action": original_action,
+            "review": review,
+        }
+        self._write_log(log_entry, self.reviews_dir)
 
     def _write_log(self, entry: dict, subdir: Path):
         """Write log entry to file"""
@@ -114,11 +123,7 @@ class AgentConfig:
                     "git_stash": "git stash",
                     "git_stash_pop": "git stash pop",
                 },
-                "allowed_command_prefixes": [
-                    "npm",
-                    "git",
-                    "npx",
-                ],
+                "allowed_command_prefixes": ["npm", "git", "npx"],
                 "forbidden_patterns": [
                     "rm -rf /",
                     "sudo",
@@ -197,10 +202,7 @@ class FileManager:
             return f"Error: {e}"
 
         if len(content.encode()) > self.max_bytes:
-            return (
-                f"Error: File too large "
-                f"(max {self.max_bytes} bytes)"
-            )
+            return f"Error: File too large (max {self.max_bytes} bytes)"
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
@@ -223,7 +225,7 @@ class FileManager:
         try:
             items = sorted(path.iterdir())
             if not items:
-                return f"[empty directory]"
+                return "[empty directory]"
 
             listing = []
             for item in items:
@@ -236,12 +238,8 @@ class FileManager:
                     elif size < 1024 * 1024:
                         size_str = f"{size / 1024:.1f}KB"
                     else:
-                        size_str = (
-                            f"{size / (1024 * 1024):.1f}MB"
-                        )
-                    listing.append(
-                        f"[FILE] {item.name} ({size_str})"
-                    )
+                        size_str = f"{size / (1024 * 1024):.1f}MB"
+                    listing.append(f"[FILE] {item.name} ({size_str})")
 
             return "\n".join(listing)
         except Exception as e:
@@ -275,9 +273,7 @@ class CommandExecutor:
         self.root = Path(root).resolve()
         self.forbidden = config.get("forbidden_patterns", [])
         self.custom_commands = config.get("allowed_commands", {})
-        self.allowed_prefixes = config.get(
-            "allowed_command_prefixes", []
-        )
+        self.allowed_prefixes = config.get("allowed_command_prefixes", [])
 
     def _check_forbidden_patterns(self, command: str) -> bool:
         """Check if command contains forbidden patterns"""
@@ -311,7 +307,8 @@ class CommandExecutor:
         for alias, template in self.custom_commands.items():
             if command.startswith(alias):
                 remainder = command[len(alias) :].strip()
-                if not command[len(alias) :] or command[len(alias)
+                if not command[len(alias) :] or command[
+                    len(alias)
                 ] in (" ", "\t"):
                     command = (
                         template.format(remainder)
@@ -322,13 +319,9 @@ class CommandExecutor:
 
         if not self._check_allowed_prefix(command):
             available = ", ".join(
-                list(self.custom_commands.keys())
-                + self.allowed_prefixes
+                list(self.custom_commands.keys()) + self.allowed_prefixes
             )
-            return (
-                f"Error: Command not allowed. "
-                f"Available: {available}"
-            )
+            return f"Error: Command not allowed. Available: {available}"
 
         try:
             result = subprocess.run(
@@ -373,9 +366,7 @@ class LMStudioClient:
         """Estimate total tokens in messages"""
         total = 0
         for msg in messages:
-            total += self._estimate_tokens(
-                msg.get("content", "")
-            )
+            total += self._estimate_tokens(msg.get("content", ""))
         return total
 
     def _trim_messages(
@@ -389,10 +380,9 @@ class LMStudioClient:
 
         trimmed = messages[:2]
         for msg in messages[2:]:
-            new_tokens = (
-                self._count_messages_tokens(trimmed)
-                + self._estimate_tokens(msg.get("content", ""))
-            )
+            new_tokens = self._count_messages_tokens(
+                trimmed
+            ) + self._estimate_tokens(msg.get("content", ""))
             if new_tokens <= max_prompt_tokens:
                 trimmed.append(msg)
 
@@ -406,13 +396,9 @@ class LMStudioClient:
         max_prompt_tokens: int = 3000,
     ) -> Optional[str]:
         """Send chat completion request with error handling"""
-        current_time = datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        messages = self._trim_messages(
-            messages, max_prompt_tokens
-        )
+        messages = self._trim_messages(messages, max_prompt_tokens)
 
         self.retry_count = 0
 
@@ -437,14 +423,14 @@ class LMStudioClient:
                 error_msg = str(e)
                 context_overflow = (
                     "context length" in error_msg.lower()
-                    or "context overflow"
-                    in error_msg.lower()
+                    or "context overflow" in error_msg.lower()
                 )
 
                 if context_overflow:
-                    print(f"\n[{current_time}] Context overflow "
-                          f"detected")
-                    print(f"Trimming message history and retrying...")
+                    print(
+                        f"\n[{current_time}] Context overflow detected"
+                    )
+                    print("Trimming message history and retrying...")
 
                     if self.logger:
                         self.logger.log_error(
@@ -452,22 +438,14 @@ class LMStudioClient:
                             "Context window exceeded",
                             {
                                 "prompt_tokens": (
-                                    self._count_messages_tokens(
-                                        messages
-                                    )
+                                    self._count_messages_tokens(messages)
                                 ),
-                                "context_window": (
-                                    self.context_window
-                                ),
-                                "retry_count": (
-                                    self.retry_count
-                                ),
+                                "context_window": self.context_window,
+                                "retry_count": self.retry_count,
                             },
                         )
 
-                    max_prompt_tokens = int(
-                        max_prompt_tokens * 0.7
-                    )
+                    max_prompt_tokens = int(max_prompt_tokens * 0.7)
                     messages = self._trim_messages(
                         messages, max_prompt_tokens
                     )
@@ -494,16 +472,14 @@ class LMStudioClient:
                 self.retry_count += 1
                 if self.retry_count < self.max_retries:
                     print(
-                        f"Retrying in {self.retry_delay} "
-                        f"seconds..."
+                        f"Retrying in {self.retry_delay} seconds..."
                     )
                     time.sleep(self.retry_delay)
                 break
 
             except requests.exceptions.Timeout:
                 print(
-                    f"\n[{current_time}] Error: Request timeout "
-                    f"(120s)"
+                    f"\n[{current_time}] Error: Request timeout (120s)"
                 )
 
                 if self.logger:
@@ -516,8 +492,7 @@ class LMStudioClient:
                 self.retry_count += 1
                 if self.retry_count < self.max_retries:
                     print(
-                        f"Retrying in {self.retry_delay} "
-                        f"seconds..."
+                        f"Retrying in {self.retry_delay} seconds..."
                     )
                     time.sleep(self.retry_delay)
                 break
@@ -542,16 +517,13 @@ class LMStudioClient:
                 self.retry_count += 1
                 if self.retry_count < self.max_retries:
                     print(
-                        f"Retrying in {self.retry_delay} "
-                        f"seconds..."
+                        f"Retrying in {self.retry_delay} seconds..."
                     )
                     time.sleep(self.retry_delay)
                 break
 
             except Exception as e:
-                print(
-                    f"\n[{current_time}] Unexpected error: {e}"
-                )
+                print(f"\n[{current_time}] Unexpected error: {e}")
 
                 if self.logger:
                     self.logger.log_error(
@@ -570,100 +542,80 @@ class LMStudioClient:
         return None
 
 
-class CommandValidator:
-    """Validate and provide feedback on invalid commands"""
+class CommandReviewer:
+    """Reviews unknown commands and provides suggestions"""
 
-    def __init__(
-        self,
-        client: LMStudioClient,
-        config: AgentConfig,
-        logger: Logger,
-    ):
+    def __init__(self, client: LMStudioClient, logger: Optional[Logger] = None):
         self.client = client
-        self.config = config
         self.logger = logger
+        self.script_path = Path(__file__).resolve()
 
-    def validate_command(
-        self, command: str, error_message: str
-    ) -> dict:
-        """Get AI feedback on why command failed and suggestions"""
-        custom_cmds = self.config.get("allowed_commands", {})
-        allowed_prefixes = self.config.get(
-            "allowed_command_prefixes", []
-        )
+    def _get_script_content(self) -> str:
+        """Read the current script file"""
+        try:
+            return self.script_path.read_text(encoding="utf-8")
+        except Exception as e:
+            return f"Error reading script: {e}"
 
-        context = f"""
-You are a command validation assistant. An AI agent tried to execute a
-command but it failed or was rejected.
+    def review_command(self, action_data: dict, full_response: str) -> str:
+        """Review an unknown command and provide suggestions"""
+        script_content = self._get_script_content()
 
-Command attempted: {command}
-Error message: {error_message}
+        review_prompt = f"""You are a command reviewer AI. A main AI agent tried to execute a command that was not recognized.
 
-Available command aliases:
-{json.dumps(custom_cmds, indent=2)}
+=== MAIN AGENT'S FULL RESPONSE ===
+{full_response}
 
-Allowed command prefixes: {', '.join(allowed_prefixes)}
+=== PARSED ACTION DATA ===
+{json.dumps(action_data, indent=2)}
 
-Analyze the command and provide:
-1. What went wrong (be specific)
-2. Why it was rejected or failed
-3. A corrected command suggestion
-4. An explanation of the suggested fix
+=== COMPLETE AGENT SYSTEM CODE ===
+{script_content}
 
-Respond with valid JSON:
-{{
-  "issue": "specific explanation of the problem",
-  "reason": "why it failed",
-  "suggested_command": "corrected command",
-  "explanation": "explanation of the fix"
-}}
-"""
+=== YOUR TASK ===
+Analyze why this command failed and provide:
+1. What the main AI was trying to do
+2. What went wrong (why the action is unknown)
+3. The correct action format they should have used
+4. A concrete example of the correct JSON format
+
+The available actions are:
+- read_file: Read a file
+- write_file: Write/create a file
+- show_dir: Show directory with details
+- list_dir: List directory contents
+- execute: Run whitelisted commands (npm, git, npx)
+- think: Record reasoning
+- submit_feedback: Request improvements
+- request_command: Request new command
+- list_commands: See available commands
+- help: Show help message
+
+Respond with a clear, concise explanation and suggestion."""
 
         messages = [
-            {"role": "user", "content": context}
+            {
+                "role": "system",
+                "content": (
+                    "You are a helpful command reviewer. "
+                    "Analyze unknown commands and provide clear, "
+                    "actionable suggestions."
+                ),
+            },
+            {"role": "user", "content": review_prompt},
         ]
 
-        response = self.client.chat(
-            messages,
-            temperature=0.3,
-            max_tokens=500,
-            max_prompt_tokens=1000,
-        )
-
-        if not response:
-            return {
-                "issue": "Unable to get feedback",
-                "reason": "AI service unavailable",
-                "suggested_command": None,
-                "explanation": "Could not reach feedback service",
-            }
-
         try:
-            start = response.find("{")
-            end = response.rfind("}") + 1
-            if start != -1 and end > start:
-                json_str = response[start:end]
-                result = json.loads(json_str)
-                self.logger.log_action(
-                    "command_validation",
-                    {
-                        "original_command": command,
-                        "error": error_message,
-                    },
-                    json.dumps(result),
-                )
-                return result
-        except json.JSONDecodeError:
-            pass
+            review = self.client.chat(
+                messages, temperature=0.3, max_tokens=800, max_prompt_tokens=8000
+            )
 
-        return {
-            "issue": "Could not parse feedback",
-            "reason": "Feedback parsing error",
-            "suggested_command": None,
-            "explanation": (
-                "The feedback could not be properly formatted"
-            ),
-        }
+            if review and self.logger:
+                self.logger.log_review(json.dumps(action_data), review)
+
+            return review or "Unable to generate review"
+        except Exception as e:
+            return f"Error generating review: {e}"
 
 
 class FeedbackManager:
@@ -680,9 +632,7 @@ class FeedbackManager:
         """Submit feedback from AI"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            feedback_file = (
-                self.feedback_dir / f"feedback_{timestamp}.txt"
-            )
+            feedback_file = self.feedback_dir / f"feedback_{timestamp}.txt"
             feedback_file.write_text(feedback_text, encoding="utf-8")
             return (
                 f"Feedback submitted: {feedback_file.name}. "
@@ -698,17 +648,14 @@ class FeedbackManager:
         """Request a new command to be added"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            request_file = (
-                self.requests_dir / f"request_{timestamp}.json"
-            )
+            request_file = self.requests_dir / f"request_{timestamp}.json"
             request_data = {
                 "timestamp": datetime.now().isoformat(),
                 "command_name": command_name,
                 "command_template": command_template,
             }
             request_file.write_text(
-                json.dumps(request_data, indent=2),
-                encoding="utf-8",
+                json.dumps(request_data, indent=2), encoding="utf-8"
             )
             return (
                 f"Command request submitted: {request_file.name}. "
@@ -745,8 +692,7 @@ class FeedbackManager:
                         f"{data.get('command_template')}"
                     )
                 except Exception:
-                    result.append(f"{f.name}: (error reading "
-                                  f"file)")
+                    result.append(f"{f.name}: (error reading file)")
             return "\n".join(result)
         except Exception as e:
             return f"Error listing requests: {e}"
@@ -759,29 +705,21 @@ class AgentLoop:
         self.config = AgentConfig(config_path)
         sandbox_root = self.config.get("sandbox_root", "./sandbox")
         self.files = FileManager(
-            sandbox_root,
-            self.config.get("max_file_size_mb", 10),
+            sandbox_root, self.config.get("max_file_size_mb", 10)
         )
         self.executor = CommandExecutor(self.config, sandbox_root)
         self.logger = Logger()
         self.client = LMStudioClient(
-            self.config.get("api_endpoint",
-                           "http://localhost:1234/v1"),
+            self.config.get("api_endpoint", "http://localhost:1234/v1"),
             self.config.get("model", "openai/gpt-oss-20b"),
-            context_window=self.config.get(
-                "context_window", 4096
-            ),
+            context_window=self.config.get("context_window", 4096),
             logger=self.logger,
         )
-        self.validator = CommandValidator(
-            self.client, self.config, self.logger
-        )
+        self.reviewer = CommandReviewer(self.client, self.logger)
         self.feedback_manager = FeedbackManager(sandbox_root)
         self.history_file = Path(sandbox_root) / ".agent_history"
         self.last_message = self._load_last_message()
-        self.max_iterations = self.config.get(
-            "max_iterations"
-        )
+        self.max_iterations = self.config.get("max_iterations")
         self.credits_name = self.config.get(
             "credits_name", "Unknown Developer"
         )
@@ -811,9 +749,7 @@ class AgentLoop:
         if not todo.startswith("Error"):
             context += f"TODO.md:\n{todo}\n\n"
 
-        context += (
-            f"Current directory:\n{self.files.show_directory()}\n"
-        )
+        context += f"Current directory:\n{self.files.show_directory()}\n"
 
         return context
 
@@ -848,81 +784,81 @@ class AgentLoop:
         prefixes = self.config.get("allowed_command_prefixes", [])
 
         help_text = f"""
-    === AGENT HELP ===
-    You are an autonomous agent with file and command execution access.
-    ALWAYS respond with valid JSON containing 'action' and 'reasoning'.
+=== AGENT HELP ===
+You are an autonomous agent with file and command execution access.
+ALWAYS respond with valid JSON containing 'action' and 'reasoning'.
 
-    CREDITS: {self.credits_name}
+CREDITS: {self.credits_name}
 
-    === AVAILABLE ACTIONS (Only these work) ===
+=== AVAILABLE ACTIONS (Only these work) ===
 
-    1. read_file - Read file content
-       {{"action": "read_file", "path": "path/to/file"}}
+1. read_file - Read file content
+   {{"action": "read_file", "path": "path/to/file", "reasoning": "why"}}
 
-    2. write_file - Write/create file
-       {{"action": "write_file", "path": "path/to/file", "content": "file content here"}}
+2. write_file - Write/create file
+   {{"action": "write_file", "path": "path/to/file", "content": "file content", "reasoning": "why"}}
 
-    3. show_dir - Show directory with details
-       {{"action": "show_dir", "path": "."}}
+3. show_dir - Show directory with details
+   {{"action": "show_dir", "path": ".", "reasoning": "why"}}
 
-    4. list_dir - List directory contents
-       {{"action": "list_dir", "path": "."}}
+4. list_dir - List directory contents
+   {{"action": "list_dir", "path": ".", "reasoning": "why"}}
 
-    5. execute - Run whitelisted commands
-       {{"action": "execute", "command": "npm install"}}
+5. execute - Run whitelisted commands
+   {{"action": "execute", "command": "npm install", "reasoning": "why"}}
 
-    6. think - Record your reasoning
-       {{"action": "think", "message": "your thoughts"}}
+6. think - Record your reasoning
+   {{"action": "think", "message": "your thoughts", "reasoning": "why"}}
 
-    7. submit_feedback - Request improvements
-       {{"action": "submit_feedback", "message": "feedback text"}}
+7. submit_feedback - Request improvements
+   {{"action": "submit_feedback", "message": "feedback text", "reasoning": "why"}}
 
-    8. request_command - Request new command
-       {{"action": "request_command", "command_name": "alias", "command_template": "command {{}}"}}
+8. request_command - Request new command
+   {{"action": "request_command", "command_name": "alias", "command_template": "command {{}}", "reasoning": "why"}}
 
-    9. list_commands - See all available commands
-       {{"action": "list_commands"}}
+9. list_commands - See all available commands
+   {{"action": "list_commands", "reasoning": "why"}}
 
-    10. help - Show this message
-        {{"action": "help"}}
+10. help - Show this message
+    {{"action": "help", "reasoning": "why"}}
 
-    === CUSTOM COMMAND ALIASES ===
-    Use these with execute action:
-    """
+=== CUSTOM COMMAND ALIASES ===
+Use these with execute action:
+"""
         for alias, template in custom_cmds.items():
             help_text += f"  • {alias}\n    Template: {template}\n"
 
-        help_text += f"\n=== ALLOWED COMMAND PREFIXES ===\nAny command starting with these is allowed:\n"
+        help_text += "\n=== ALLOWED COMMAND PREFIXES ===\nAny command starting with these is allowed:\n"
         for prefix in prefixes:
             help_text += f"  • {prefix}\n"
 
         help_text += """
-    === EXAMPLE WORKFLOWS ===
+=== EXAMPLE WORKFLOWS ===
 
-    Setup project:
-      {{"action": "execute", "command": "npm install"}}
-      {{"action": "write_file", "path": "package.json", "content": "{{}}"}}
-      {{"action": "execute", "command": "npm run build"}}
+Setup project:
+  {{"action": "execute", "command": "npm install", "reasoning": "Install dependencies"}}
+  {{"action": "write_file", "path": "package.json", "content": "{{}}", "reasoning": "Create config"}}
+  {{"action": "execute", "command": "npm run build", "reasoning": "Build project"}}
 
-    Git workflow:
-      {{"action": "execute", "command": "git status"}}
-      {{"action": "execute", "command": "git add ."}}
-      {{"action": "execute", "command": "git commit -m 'initial commit'"}}
-      {{"action": "execute", "command": "git log -n 5"}}
+Git workflow:
+  {{"action": "execute", "command": "git status", "reasoning": "Check repo status"}}
+  {{"action": "execute", "command": "git add .", "reasoning": "Stage all changes"}}
+  {{"action": "execute", "command": "git commit -m 'initial commit'", "reasoning": "Commit changes"}}
 
-    File operations:
-      {{"action": "show_dir", "path": "."}}
-      {{"action": "read_file", "path": "README.md"}}
-      {{"action": "write_file", "path": "src/index.js", "content": "console.log('hello');"}}
+File operations:
+  {{"action": "show_dir", "path": ".", "reasoning": "Check directory contents"}}
+  {{"action": "read_file", "path": "README.md", "reasoning": "Read documentation"}}
+  {{"action": "write_file", "path": "src/index.js", "content": "console.log('hello');", "reasoning": "Create entry point"}}
 
-    === IMPORTANT RULES ===
-    ✓ Only use actions listed above
-    ✓ Always include "action" and "reasoning" in JSON
-    ✓ Path must be relative, no leading /
-    ✓ Use execute action to run npm, git, npx commands
-    ✓ Content in write_file can be multiline with \\n
-    ✓ Check commands with list_commands if unsure
-    """
+=== IMPORTANT RULES ===
+✓ Only use actions listed above
+✓ Always include "action" and "reasoning" in JSON
+✓ Path must be relative, no leading /
+✓ Use execute action to run npm, git, npx commands
+✓ Content in write_file can be multiline with \\n
+✓ Check commands with list_commands if unsure
+✓ If your action is "unknown", read the review carefully and fix your format
+"""
         return help_text
 
     def run(self):
@@ -962,13 +898,9 @@ class AgentLoop:
                 iteration += 1
                 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                if (
-                        self.max_iterations
-                        and iteration > self.max_iterations
-                ):
+                if self.max_iterations and iteration > self.max_iterations:
                     print(
-                        f"\n[{current_time}] Reached max iterations. "
-                        f"Exiting."
+                        f"\n[{current_time}] Reached max iterations. Exiting."
                     )
                     break
 
@@ -985,8 +917,7 @@ class AgentLoop:
 
                 if response is None:
                     print(
-                        f"[{current_time}] Failed to get response. "
-                        f"Retrying..."
+                        f"[{current_time}] Failed to get response. Retrying..."
                     )
                     time.sleep(5)
                     continue
@@ -1000,7 +931,7 @@ class AgentLoop:
                 action = self._parse_action(response)
 
                 if not action:
-                    action = {"action": "help"}
+                    action = {"action": "none"}
 
                 action_type = action.get("action", "help").lower()
 
@@ -1008,15 +939,10 @@ class AgentLoop:
                 if action_type == "read_file":
                     path = action.get("path", "")
                     result = self.files.read_file(path)
-                    self.logger.log_action(
-                        action_type, {"path": path}, result
-                    )
+                    self.logger.log_action(action_type, {"path": path}, result)
                 elif action_type == "write_file":
                     params = action.get("parameters", action)
-                    path = (
-                            params.get("path")
-                            or params.get("file_path", "")
-                    )
+                    path = params.get("path") or params.get("file_path", "")
                     content = params.get("content", "")
                     result = self.files.write_file(path, content)
                     self.logger.log_action(
@@ -1027,41 +953,15 @@ class AgentLoop:
                 elif action_type == "show_dir":
                     path = action.get("path", ".")
                     result = self.files.show_directory(path)
-                    self.logger.log_action(
-                        action_type, {"path": path}, result
-                    )
+                    self.logger.log_action(action_type, {"path": path}, result)
                 elif action_type == "list_dir":
                     path = action.get("path", ".")
                     result = self.files.list_directory(path)
-                    self.logger.log_action(
-                        action_type, {"path": path}, result
-                    )
+                    self.logger.log_action(action_type, {"path": path}, result)
                 elif action_type == "execute":
                     params = action.get("parameters", action)
                     command = params.get("command", "")
                     result = self.executor.execute(command)
-
-                    if result.startswith("Error:"):
-                        print(
-                            f"[{current_time}] Command validation "
-                            f"triggered"
-                        )
-                        validation_feedback = (
-                            self.validator.validate_command(
-                                command, result
-                            )
-                        )
-                        result = (
-                            f"{result}\n\n"
-                            f"=== VALIDATION FEEDBACK ===\n"
-                            f"Issue: {validation_feedback.get('issue')}\n"
-                            f"Reason: {validation_feedback.get('reason')}\n"
-                            f"Suggested: "
-                            f"{validation_feedback.get('suggested_command')}\n"
-                            f"Explanation: "
-                            f"{validation_feedback.get('explanation')}\n"
-                        )
-
                     self.logger.log_action(
                         action_type, {"command": command}, result
                     )
@@ -1073,19 +973,15 @@ class AgentLoop:
                     )
                 elif action_type == "submit_feedback":
                     message = action.get("message", "")
-                    result = (
-                        self.feedback_manager.submit_feedback(message)
-                    )
+                    result = self.feedback_manager.submit_feedback(message)
                     self.logger.log_action(
                         action_type, {"message": message}, result
                     )
                 elif action_type == "request_command":
                     cmd_name = action.get("command_name", "")
                     cmd_template = action.get("command_template", "")
-                    result = (
-                        self.feedback_manager.request_command(
-                            cmd_name, cmd_template
-                        )
+                    result = self.feedback_manager.request_command(
+                        cmd_name, cmd_template
                     )
                     self.logger.log_action(
                         action_type,
@@ -1097,9 +993,7 @@ class AgentLoop:
                     )
                 elif action_type == "help":
                     result = self._format_help()
-                    self.logger.log_action(
-                        action_type, {}, result
-                    )
+                    self.logger.log_action(action_type, {}, result)
                 elif action_type == "list_commands":
                     custom_cmds = self.config.get("allowed_commands", {})
                     prefixes = self.config.get("allowed_command_prefixes", [])
@@ -1116,25 +1010,32 @@ class AgentLoop:
                     for prefix in prefixes:
                         result += f"{prefix}\n"
 
-                    self.logger.log_action(
-                        action_type, {}, result
-                    )
+                    self.logger.log_action(action_type, {}, result)
                 else:
-                    result = f"Unknown action: {action_type}"
+                    # Unknown action - trigger review
+                    print(
+                        f"\n[{current_time}] Unknown action detected: "
+                        f"{action_type}"
+                    )
+                    print("Requesting command review from AI...\n")
+
+                    review = self.reviewer.review_command(action, response)
+
+                    result = (
+                        f"❌ UNKNOWN ACTION: '{action_type}'\n\n"
+                        f"=== AI REVIEWER ANALYSIS ===\n{review}\n\n"
+                        f"Please use the suggested format and try again. "
+                        f"Type {{'action': 'help'}} to see all available actions."
+                    )
+
                     self.logger.log_action(
-                        "unknown",
-                        {"requested_action": action_type},
-                        result,
+                        "unknown", {"requested_action": action_type}, result
                     )
 
                 print(f"Result:\n{result}\n")
 
-                messages.append(
-                    {"role": "assistant", "content": response}
-                )
-                messages.append(
-                    {"role": "user", "content": result}
-                )
+                messages.append({"role": "assistant", "content": response})
+                messages.append({"role": "user", "content": result})
 
                 if len(messages) > 14:
                     messages = messages[:2] + messages[-12:]
@@ -1142,20 +1043,14 @@ class AgentLoop:
                 time.sleep(1)
 
             except KeyboardInterrupt:
-                current_time = datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 print(f"\n[{current_time}] Exiting agent loop")
                 break
             except Exception as e:
-                current_time = datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 print(f"[{current_time}] Error: {e}")
                 self.logger.log_error(
-                    "loop_error",
-                    str(e),
-                    {"iteration": iteration},
+                    "loop_error", str(e), {"iteration": iteration}
                 )
                 time.sleep(2)
 
