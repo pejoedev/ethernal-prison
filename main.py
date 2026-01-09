@@ -28,7 +28,7 @@ class AgentConfig:
             default = {
                 "api_endpoint": "http://localhost:1234/v1",
                 "model": "openai/gpt-oss-20b",
-                "root_directory": ".",
+                "sandbox_root": "./sandbox",
                 "max_file_size_mb": 10,
                 "temperature": 0.7,
                 "max_tokens": 2000,
@@ -74,6 +74,8 @@ class FileManager:
 
     def __init__(self, root: str, max_size_mb: int = 10):
         self.root = Path(root).resolve()
+        # Create sandbox directory if it doesn't exist
+        self.root.mkdir(parents=True, exist_ok=True)
         self.max_bytes = max_size_mb * 1024 * 1024
 
     def _sanitize_path(self, filepath: str) -> str:
@@ -321,16 +323,17 @@ class AgentLoop:
 
     def __init__(self, config_path: str = "settings.json"):
         self.config = AgentConfig(config_path)
+        sandbox_root = self.config.get("sandbox_root", "./sandbox")
         self.files = FileManager(
-            self.config.get("root_directory", "."),
+            sandbox_root,
             self.config.get("max_file_size_mb", 10),
         )
-        self.executor = CommandExecutor(self.config, ".")
+        self.executor = CommandExecutor(self.config, sandbox_root)
         self.client = LMStudioClient(
             self.config.get("api_endpoint", "http://localhost:1234/v1"),
             self.config.get("model", "openai/gpt-oss-20b"),
         )
-        self.history_file = Path(".agent_history")
+        self.history_file = Path(sandbox_root) / ".agent_history"
         self.last_message = self._load_last_message()
 
     def _load_last_message(self) -> Optional[str]:
@@ -356,7 +359,7 @@ class AgentLoop:
         if not readme.startswith("Error"):
             context += f"README.md:\n{readme}\n\n"
 
-        # Add TO DO
+        # Add TO-DO
         todo = self.files.read_file("TODO.md")
         if not todo.startswith("Error"):
             context += f"TODO.md:\n{todo}\n\n"
@@ -389,6 +392,11 @@ class AgentLoop:
 You are an autonomous agent with access to file and command execution.
 Always respond with valid JSON containing an 'action' field.
 If you do not know what to do, respond with {"action": "help"}.
+
+You will be here with enough time to be as perfectionistic as you want to be. 
+You can also choose to improve the thing you are making where you see fit. 
+You are the developer, and have full creative ownership over what you make, the process, the result etc.
+Only requirement, is to see the task given as the minimal required product.
 
 AVAILABLE ACTIONS:
 1. read_file
@@ -425,23 +433,26 @@ CUSTOM COMMAND ALIASES:
 
         help_text += """
 SECURITY NOTES:
-- All paths are sandboxed to the root directory
+- All paths are sandboxed to the sandbox root directory
 - Path sanitization: /, ./, and ../ are automatically removed
 - Command chaining (&&, ||, ;) is forbidden
 - Shell subshells (``, $()) are forbidden
 - Only npm, git, npx, and custom commands are allowed
 
-EXAMPLE PATHS (all safely resolve within root):
-  "src/index.js"     -> ./src/index.js
-  "/src/index.js"    -> ./src/index.js (leading / removed)
-  "src/../index.js"  -> ./src/index.js (../ removed)
-  "./src/index.js"   -> ./src/index.js (./ removed)
+EXAMPLE PATHS (all safely resolve within sandbox):
+  "src/index.js"     -> sandbox/src/index.js
+  "/src/index.js"    -> sandbox/src/index.js (leading / removed)
+  "src/../index.js"  -> sandbox/src/index.js (../ removed)
+  "./src/index.js"   -> sandbox/src/index.js (./ removed)
 """
         return help_text
 
     def run(self):
         """Main agent loop"""
         print("Autonomous AI Agent Loop")
+        print(
+            f"Sandbox root: {self.files.root}"
+        )
         print("Press Ctrl+C to exit\n")
 
         context = self._build_context()
