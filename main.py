@@ -750,95 +750,79 @@ class AgentLoop:
 
         help_text = f"""
     === AGENT HELP ===
-    You are an autonomous agent with access to file and command execution.
-    Always respond with valid JSON containing an 'action' field.
-
-    IMPORTANT DIRECTIVES:
-    - You are NOT done until the project is excellent
-    - Always look for ways to improve: code quality, features,
-      documentation, testing, performance, security
-    - After completing main tasks, refactor, optimize, and enhance
-    - Use git to track progress and maintain clean history
-    - Commit frequently with descriptive messages
-    - Review your work and identify next improvements
-    - The task description is the MINIMUM requirement, not the goal
+    You are an autonomous agent with file and command execution access.
+    ALWAYS respond with valid JSON containing 'action' and 'reasoning'.
 
     CREDITS: {self.credits_name}
 
-    AVAILABLE ACTIONS:
-    1. read_file
+    === AVAILABLE ACTIONS (Only these work) ===
+
+    1. read_file - Read file content
        {{"action": "read_file", "path": "path/to/file"}}
 
-    2. write_file
-       {{"action": "write_file", "path": "path/to/file", "content": "..."}}
+    2. write_file - Write/create file
+       {{"action": "write_file", "path": "path/to/file", "content": "file content here"}}
 
-    3. show_dir
-       {{"action": "show_dir", "path": "." (default: current dir)}}
+    3. show_dir - Show directory with details
+       {{"action": "show_dir", "path": "."}}
 
-    4. list_dir
-       {{"action": "list_dir", "path": "." (default: current dir)}}
+    4. list_dir - List directory contents
+       {{"action": "list_dir", "path": "."}}
 
-    5. execute
-       {{"action": "execute", "command": "command to run"}}
+    5. execute - Run whitelisted commands
+       {{"action": "execute", "command": "npm install"}}
 
-    6. think
-       {{"action": "think", "message": "your reasoning"}}
+    6. think - Record your reasoning
+       {{"action": "think", "message": "your thoughts"}}
 
-    7. submit_feedback
-       {{"action": "submit_feedback", "message": "your feedback"}}
+    7. submit_feedback - Request improvements
+       {{"action": "submit_feedback", "message": "feedback text"}}
 
-    8. request_command
-       {{"action": "request_command", "command_name": "alias",
-        "command_template": "command with {{}} placeholder"}}
+    8. request_command - Request new command
+       {{"action": "request_command", "command_name": "alias", "command_template": "command {{}}"}}
 
-    9. help
-       {{"action": "help"}}
+    9. list_commands - See all available commands
+       {{"action": "list_commands"}}
 
-    CUSTOM COMMAND ALIASES:
+    10. help - Show this message
+        {{"action": "help"}}
+
+    === CUSTOM COMMAND ALIASES ===
+    Use these with execute action:
     """
         for alias, template in custom_cmds.items():
-            help_text += f"  {alias}: {template}\n"
+            help_text += f"  • {alias}\n    Template: {template}\n"
 
-        help_text += f"\nALLOWED COMMAND PREFIXES:\n"
+        help_text += f"\n=== ALLOWED COMMAND PREFIXES ===\nAny command starting with these is allowed:\n"
         for prefix in prefixes:
-            help_text += f"  {prefix}\n"
+            help_text += f"  • {prefix}\n"
 
         help_text += """
-    GIT WORKFLOW (Essential for progress tracking):
-      git status           - Check current state
-      git add .            - Stage all changes
-      git commit -m 'msg'  - Commit with message
-      git log -n 5         - View recent commits
-      git diff             - See what changed
-      git branch feature   - Create feature branch
-      git checkout feature - Switch branch
+    === EXAMPLE WORKFLOWS ===
 
-    CONTINUOUS IMPROVEMENT CHECKLIST:
-    □ Core functionality implemented?
-    □ Error handling and edge cases covered?
-    □ Code is clean, readable, well-commented?
-    □ Tests written and passing?
-    □ Documentation complete and clear?
-    □ Performance optimized?
-    □ Security best practices followed?
-    □ No warnings or linting issues?
-    □ All commits pushed with clear messages?
-    □ README updated with features and usage?
-    □ Consider: features, quality, architecture improvements
+    Setup project:
+      {{"action": "execute", "command": "npm install"}}
+      {{"action": "write_file", "path": "package.json", "content": "{{}}"}}
+      {{"action": "execute", "command": "npm run build"}}
 
-    WORKFLOW:
-    1. Implement features
-    2. git commit -m 'feat: description'
-    3. Test thoroughly
-    4. git commit -m 'test: add test cases'
-    5. Refactor and improve
-    6. git commit -m 'refactor: improve code quality'
-    7. Document everything
-    8. git commit -m 'docs: update documentation'
-    9. Identify next improvements
-    10. Repeat from step 1
+    Git workflow:
+      {{"action": "execute", "command": "git status"}}
+      {{"action": "execute", "command": "git add ."}}
+      {{"action": "execute", "command": "git commit -m 'initial commit'"}}
+      {{"action": "execute", "command": "git log -n 5"}}
 
-    REMEMBER: You have time to be perfectionistic. Make it excellent.
+    File operations:
+      {{"action": "show_dir", "path": "."}}
+      {{"action": "read_file", "path": "README.md"}}
+      {{"action": "write_file", "path": "src/index.js", "content": "console.log('hello');"}}
+
+    === IMPORTANT RULES ===
+    ✓ Only use actions listed above
+    ✓ Always include "action" and "reasoning" in JSON
+    ✓ Path must be relative, no leading /
+    ✓ Use execute action to run npm, git, npx commands
+    ✓ Content in write_file can be multiline with \\n
+    ✓ Check commands with list_commands if unsure
     """
         return help_text
 
@@ -992,6 +976,25 @@ class AgentLoop:
                     )
                 elif action_type == "help":
                     result = self._format_help()
+                    self.logger.log_action(
+                        action_type, {}, result
+                    )
+                elif action_type == "list_commands":
+                    custom_cmds = self.config.get("allowed_commands", {})
+                    prefixes = self.config.get("allowed_command_prefixes", [])
+
+                    result = "=== AVAILABLE ACTIONS ===\n"
+                    result += "read_file, write_file, show_dir, list_dir, execute, "
+                    result += "think, submit_feedback, request_command, list_commands, help\n\n"
+
+                    result += "=== CUSTOM COMMAND ALIASES ===\n"
+                    for alias, template in custom_cmds.items():
+                        result += f"{alias}: {template}\n"
+
+                    result += "\n=== ALLOWED COMMAND PREFIXES ===\n"
+                    for prefix in prefixes:
+                        result += f"{prefix}\n"
+
                     self.logger.log_action(
                         action_type, {}, result
                     )
