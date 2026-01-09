@@ -17,9 +17,11 @@ class Logger:
         self.logs_dir = Path(logs_dir)
         self.actions_dir = self.logs_dir / "actions"
         self.responses_dir = self.logs_dir / "responses"
+        self.errors_dir = self.logs_dir / "errors"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.actions_dir.mkdir(parents=True, exist_ok=True)
         self.responses_dir.mkdir(parents=True, exist_ok=True)
+        self.errors_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_log_file(self, subdir: Path) -> Path:
         """Get today's log file path"""
@@ -47,6 +49,16 @@ class Logger:
             "full_length": len(response),
         }
         self._write_log(log_entry, self.responses_dir)
+
+    def log_error(self, error_type: str, message: str, context: dict):
+        """Log errors with context"""
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "error_type": error_type,
+            "message": message,
+            "context": context,
+        }
+        self._write_log(log_entry, self.errors_dir)
 
     def _write_log(self, entry: dict, subdir: Path):
         """Write log entry to file"""
@@ -77,6 +89,8 @@ class AgentConfig:
                 "max_tokens": 2000,
                 "max_iterations": None,
                 "credits_name": "Unknown Developer",
+                "context_window": 4096,
+                "max_prompt_tokens": 3000,
                 "allowed_commands": {
                     "nest": "npx @nestjs/cli@latest new {}",
                     "nest_gen": "nest generate module {}",
@@ -336,38 +350,224 @@ class CommandExecutor:
 class LMStudioClient:
     """Client for LM Studio's OpenAI-compatible API"""
 
-    def __init__(self, endpoint: str, model: str):
+    def __init__(
+        self,
+        endpoint: str,
+        model: str,
+        context_window: int = 4096,
+        logger: Optional[Logger] = None,
+    ):
         self.endpoint = endpoint
         self.model = model
+        self.context_window = context_window
+        self.logger = logger
+        self.retry_count = 0
+        self.max_retries = 3
+        self.retry_delay = 5
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough estimation: ~1 token per 4 characters"""
+        return len(text) // 4
+
+    def _count_messages_tokens(self, messages: list) -> int:
+        """Estimate total tokens in messages"""
+        total = 0
+        for msg in messages:
+            total += self._estimate_tokens(
+                msg.get("content", "")
+            )
+        return total
+
+    def _trim_messages(
+        self, messages: list, max_prompt_tokens: int
+    ) -> list:
+        """Trim messages to stay under token limit"""
+        tokens = self._count_messages_tokens(messages)
+
+        if tokens <= max_prompt_tokens:
+            return messages
+
+        trimmed = messages[:2]
+        for msg in messages[2:]:
+            new_tokens = (
+                self._count_messages_tokens(trimmed)
+                + self._estimate_tokens(msg.get("content", ""))
+            )
+            if new_tokens <= max_prompt_tokens:
+                trimmed.append(msg)
+
+        return trimmed
 
     def chat(
         self,
         messages: list,
         temperature: float = 0.7,
         max_tokens: int = 2000,
+        max_prompt_tokens: int = 3000,
     ) -> Optional[str]:
-        """Send chat completion request"""
-        try:
-            response = requests.post(
-                f"{self.endpoint}/chat/completions",
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
-                timeout=120,
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
-        except requests.exceptions.RequestException as e:
-            print(f"Error: Failed to reach LM Studio - {e}")
-            print(
-                "Make sure LM Studio is running. "
-                "Start it with: lms server start"
-            )
-            return None
+        """Send chat completion request with error handling"""
+        current_time = datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        messages = self._trim_messages(
+            messages, max_prompt_tokens
+        )
+
+        self.retry_count = 0
+
+        while self.retry_count < self.max_retries:
+            try:
+                response = requests.post(
+                    f"{self.endpoint}/chat/completions",
+                    json={
+                        "model": self.model,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    },
+                    timeout=120,
+                )
+                response.raise_for_status()
+                data = response.json()
+                self.retry_count = 0
+                return data["choices"][0]["message"]["content"]
+
+            except requests.exceptions.HTTPError as e:
+                error_msg = str(e)
+                context_overflow = (
+                    "context length" in error_msg.lower()
+                    or "context overflow"
+                    in error_msg.lower()
+                )
+
+                if context_overflow:
+                    print(f"\n[{current_time}] Context overflow "
+                          f"detected")
+                    print(f"Trimming message history and retrying...")
+
+                    if self.logger:
+                        self.logger.log_error(
+                            "context_overflow",
+                            "Context window exceeded",
+                            {
+                                "prompt_tokens": (
+                                    self._count_messages_tokens(
+                                        messages
+                                    )
+                                ),
+                                "context_window": (
+                                    self.context_window
+                                ),
+                                "retry_count": (
+                                    self.retry_count
+                                ),
+                            },
+                        )
+
+                    max_prompt_tokens = int(
+                        max_prompt_tokens * 0.7
+                    )
+                    messages = self._trim_messages(
+                        messages, max_prompt_tokens
+                    )
+                    self.retry_count += 1
+                    time.sleep(self.retry_delay)
+                    continue
+
+                print(
+                    f"\n[{current_time}] Error: Failed to reach "
+                    f"LM Studio - {e}"
+                )
+                print(
+                    "Make sure LM Studio is running. "
+                    "Start it with: lms server start"
+                )
+
+                if self.logger:
+                    self.logger.log_error(
+                        "http_error",
+                        str(e),
+                        {"retry_count": self.retry_count},
+                    )
+
+                self.retry_count += 1
+                if self.retry_count < self.max_retries:
+                    print(
+                        f"Retrying in {self.retry_delay} "
+                        f"seconds..."
+                    )
+                    time.sleep(self.retry_delay)
+                break
+
+            except requests.exceptions.Timeout:
+                print(
+                    f"\n[{current_time}] Error: Request timeout "
+                    f"(120s)"
+                )
+
+                if self.logger:
+                    self.logger.log_error(
+                        "timeout",
+                        "Request timeout after 120 seconds",
+                        {"retry_count": self.retry_count},
+                    )
+
+                self.retry_count += 1
+                if self.retry_count < self.max_retries:
+                    print(
+                        f"Retrying in {self.retry_delay} "
+                        f"seconds..."
+                    )
+                    time.sleep(self.retry_delay)
+                break
+
+            except requests.exceptions.ConnectionError:
+                print(
+                    f"\n[{current_time}] Error: Cannot connect to "
+                    f"LM Studio"
+                )
+                print(
+                    "Make sure LM Studio is running. "
+                    "Start it with: lms server start"
+                )
+
+                if self.logger:
+                    self.logger.log_error(
+                        "connection_error",
+                        "Failed to connect to LM Studio",
+                        {"endpoint": self.endpoint},
+                    )
+
+                self.retry_count += 1
+                if self.retry_count < self.max_retries:
+                    print(
+                        f"Retrying in {self.retry_delay} "
+                        f"seconds..."
+                    )
+                    time.sleep(self.retry_delay)
+                break
+
+            except Exception as e:
+                print(
+                    f"\n[{current_time}] Unexpected error: {e}"
+                )
+
+                if self.logger:
+                    self.logger.log_error(
+                        "unexpected_error",
+                        str(e),
+                        {"retry_count": self.retry_count},
+                    )
+
+                self.retry_count += 1
+                break
+
+        print(
+            f"\n[{current_time}] Failed to get response from "
+            f"LM Studio after {self.retry_count} attempts"
+        )
+        return None
 
 
 class FeedbackManager:
@@ -449,7 +649,8 @@ class FeedbackManager:
                         f"{data.get('command_template')}"
                     )
                 except Exception:
-                    result.append(f"{f.name}: (error reading file)")
+                    result.append(f"{f.name}: (error reading "
+                                  f"file)")
             return "\n".join(result)
         except Exception as e:
             return f"Error listing requests: {e}"
@@ -466,12 +667,16 @@ class AgentLoop:
             self.config.get("max_file_size_mb", 10),
         )
         self.executor = CommandExecutor(self.config, sandbox_root)
+        self.logger = Logger()
         self.client = LMStudioClient(
             self.config.get("api_endpoint",
                            "http://localhost:1234/v1"),
             self.config.get("model", "openai/gpt-oss-20b"),
+            context_window=self.config.get(
+                "context_window", 4096
+            ),
+            logger=self.logger,
         )
-        self.logger = Logger()
         self.feedback_manager = FeedbackManager(sandbox_root)
         self.history_file = Path(sandbox_root) / ".agent_history"
         self.last_message = self._load_last_message()
@@ -566,6 +771,9 @@ AVAILABLE ACTIONS:
 
 2. write_file
    {{"action": "write_file", "path": "path/to/file", "content": "..."}}
+   OR
+   {{"action": "write_file", "file_path": "path/to/file", "content": "..."}}
+   Both 'path' and 'file_path' parameters are accepted.
 
 3. show_dir
    {{"action": "show_dir", "path": "." (default: current dir)}}
@@ -625,12 +833,20 @@ EXAMPLE PATHS (all safely resolve within sandbox):
 
     def run(self):
         """Main agent loop"""
+        current_time = datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
         print("Autonomous AI Agent Loop")
+        print(f"Started: {current_time}")
         print(f"Sandbox root: {self.files.root}")
         print(f"Logs directory: {self.logger.logs_dir}")
         print(f"  Actions log: {self.logger.actions_dir}")
         print(f"  Responses log: {self.logger.responses_dir}")
+        print(f"  Errors log: {self.logger.errors_dir}")
         print(f"Credits: {self.credits_name}")
+        print(f"Context window: "
+              f"{self.client.context_window} tokens")
         if self.max_iterations:
             print(f"Max iterations: {self.max_iterations}")
         print("Press Ctrl+C to exit\n")
@@ -658,18 +874,23 @@ EXAMPLE PATHS (all safely resolve within sandbox):
         while True:
             try:
                 iteration += 1
+                current_time = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
 
                 if (
                     self.max_iterations
                     and iteration > self.max_iterations
                 ):
                     print(
-                        f"\nReached max iterations "
-                        f"({self.max_iterations}). Exiting."
+                        f"\n[{current_time}] Reached max "
+                        f"iterations ({self.max_iterations}). "
+                        f"Exiting."
                     )
                     break
 
-                print(f"\n--- Iteration {iteration} ---")
+                print(f"\n[{current_time}] --- Iteration "
+                      f"{iteration} ---")
 
                 response = self.client.chat(
                     messages,
@@ -679,13 +900,19 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                     max_tokens=self.config.get(
                         "max_tokens", 2000
                     ),
+                    max_prompt_tokens=self.config.get(
+                        "max_prompt_tokens", 3000
+                    ),
                 )
 
                 if response is None:
                     print(
-                        "Failed to get response from LM Studio"
+                        f"\n[{current_time}] Failed to get "
+                        f"response from LM Studio. "
+                        f"Retrying next iteration..."
                     )
-                    break
+                    time.sleep(5)
+                    continue
 
                 print(f"Response:\n{response}\n")
                 self._save_message(response)
@@ -698,7 +925,8 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                 if not action:
                     action = {"action": "help"}
 
-                action_type = action.get("action", "help").lower()
+                action_type = action.get("action",
+                                        "help").lower()
 
                 # Execute action and capture result
                 if action_type == "read_file":
@@ -710,11 +938,10 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                         result,
                     )
                 elif action_type == "write_file":
-                    path = action.get("path", "")
+                    # Accept both 'path' and 'file_path' for flexibility
+                    path = action.get("path") or action.get("file_path", "")
                     content = action.get("content", "")
-                    result = self.files.write_file(
-                        path, content
-                    )
+                    result = self.files.write_file(path, content)
                     self.logger.log_action(
                         action_type,
                         {
@@ -805,7 +1032,9 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                 messages.append(
                     {"role": "assistant", "content": response}
                 )
-                messages.append({"role": "user", "content": result})
+                messages.append(
+                    {"role": "user", "content": result}
+                )
 
                 if len(messages) > 14:
                     messages = messages[:2] + messages[-12:]
@@ -813,14 +1042,20 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                 time.sleep(1)
 
             except KeyboardInterrupt:
-                print("\nExiting agent loop")
+                current_time = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                print(f"\n[{current_time}] Exiting agent loop")
                 break
             except Exception as e:
-                print(f"Error in loop: {e}")
-                self.logger.log_action(
-                    "error",
-                    {"error_message": str(e)},
+                current_time = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                print(f"[{current_time}] Error in loop: {e}")
+                self.logger.log_error(
+                    "loop_error",
                     str(e),
+                    {"iteration": iteration},
                 )
                 time.sleep(2)
 
