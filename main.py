@@ -61,6 +61,8 @@ class AgentConfig:
                 "max_file_size_mb": 10,
                 "temperature": 0.7,
                 "max_tokens": 2000,
+                "max_iterations": None,
+                "credits_name": "Unknown Developer",
                 "allowed_commands": {
                     "nest": "npx @nestjs/cli@latest new {}",
                     "nest_gen": "nest generate module {}",
@@ -165,7 +167,10 @@ class FileManager:
             return f"Error: {e}"
 
         if len(content.encode()) > self.max_bytes:
-            return f"Error: File too large (max {self.max_bytes} bytes)"
+            return (
+                f"Error: File too large "
+                f"(max {self.max_bytes} bytes)"
+            )
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
@@ -201,8 +206,12 @@ class FileManager:
                     elif size < 1024 * 1024:
                         size_str = f"{size / 1024:.1f}KB"
                     else:
-                        size_str = f"{size / (1024 * 1024):.1f}MB"
-                    listing.append(f"[FILE] {item.name} ({size_str})")
+                        size_str = (
+                            f"{size / (1024 * 1024):.1f}MB"
+                        )
+                    listing.append(
+                        f"[FILE] {item.name} ({size_str})"
+                    )
 
             return "\n".join(listing)
         except Exception as e:
@@ -272,10 +281,8 @@ class CommandExecutor:
         for alias, template in self.custom_commands.items():
             if command.startswith(alias):
                 remainder = command[len(alias) :].strip()
-                if not command[len(alias) :] or command[len(alias)] in (
-                    " ",
-                    "\t",
-                ):
+                if not command[len(alias) :] or command[len(alias)
+                ] in (" ", "\t"):
                     command = (
                         template.format(remainder)
                         if remainder
@@ -347,6 +354,91 @@ class LMStudioClient:
             return None
 
 
+class FeedbackManager:
+    """Manage AI feedback and command requests"""
+
+    def __init__(self, sandbox_root: str):
+        self.sandbox_root = Path(sandbox_root).resolve()
+        self.feedback_dir = self.sandbox_root / ".feedback"
+        self.requests_dir = self.sandbox_root / ".requests"
+        self.feedback_dir.mkdir(parents=True, exist_ok=True)
+        self.requests_dir.mkdir(parents=True, exist_ok=True)
+
+    def submit_feedback(self, feedback_text: str) -> str:
+        """Submit feedback from AI"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            feedback_file = (
+                self.feedback_dir / f"feedback_{timestamp}.txt"
+            )
+            feedback_file.write_text(feedback_text, encoding="utf-8")
+            return (
+                f"Feedback submitted: {feedback_file.name}. "
+                f"Note: This feedback may take hundreds of "
+                f"iterations to be reviewed."
+            )
+        except Exception as e:
+            return f"Error submitting feedback: {e}"
+
+    def request_command(
+        self, command_name: str, command_template: str
+    ) -> str:
+        """Request a new command to be added"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            request_file = (
+                self.requests_dir / f"request_{timestamp}.json"
+            )
+            request_data = {
+                "timestamp": datetime.now().isoformat(),
+                "command_name": command_name,
+                "command_template": command_template,
+            }
+            request_file.write_text(
+                json.dumps(request_data, indent=2),
+                encoding="utf-8",
+            )
+            return (
+                f"Command request submitted: {request_file.name}. "
+                f"Requested command: '{command_name}' = "
+                f"'{command_template}'. "
+                f"Note: This request may take hundreds of "
+                f"iterations to be processed."
+            )
+        except Exception as e:
+            return f"Error submitting command request: {e}"
+
+    def list_feedback(self) -> str:
+        """List all submitted feedback"""
+        try:
+            files = sorted(self.feedback_dir.glob("feedback_*.txt"))
+            if not files:
+                return "No feedback submitted yet."
+            return "\n".join(f.name for f in files)
+        except Exception as e:
+            return f"Error listing feedback: {e}"
+
+    def list_requests(self) -> str:
+        """List all submitted command requests"""
+        try:
+            files = sorted(self.requests_dir.glob("request_*.json"))
+            if not files:
+                return "No command requests submitted yet."
+            result = []
+            for f in files:
+                try:
+                    data = json.loads(f.read_text())
+                    result.append(
+                        f"{f.name}: {data.get('command_name')} = "
+                        f"{data.get('command_template')}"
+                    )
+                except Exception:
+                    result.append(f"{f.name}: (error reading file)")
+            return "\n".join(result)
+        except Exception as e:
+            return f"Error listing requests: {e}"
+
+
 class AgentLoop:
     """Main autonomous agent loop"""
 
@@ -359,12 +451,20 @@ class AgentLoop:
         )
         self.executor = CommandExecutor(self.config, sandbox_root)
         self.client = LMStudioClient(
-            self.config.get("api_endpoint", "http://localhost:1234/v1"),
+            self.config.get("api_endpoint",
+                           "http://localhost:1234/v1"),
             self.config.get("model", "openai/gpt-oss-20b"),
         )
         self.logger = Logger()
+        self.feedback_manager = FeedbackManager(sandbox_root)
         self.history_file = Path(sandbox_root) / ".agent_history"
         self.last_message = self._load_last_message()
+        self.max_iterations = self.config.get(
+            "max_iterations"
+        )
+        self.credits_name = self.config.get(
+            "credits_name", "Unknown Developer"
+        )
 
     def _load_last_message(self) -> Optional[str]:
         """Load last message from history file"""
@@ -391,7 +491,9 @@ class AgentLoop:
         if not todo.startswith("Error"):
             context += f"TODO.md:\n{todo}\n\n"
 
-        context += f"Current directory:\n{self.files.show_directory()}\n"
+        context += (
+            f"Current directory:\n{self.files.show_directory()}\n"
+        )
 
         return context
 
@@ -412,42 +514,60 @@ class AgentLoop:
         custom_cmds = self.config.get("allowed_commands", {})
         prefixes = self.config.get("allowed_command_prefixes", [])
 
-        help_text = """
+        help_text = f"""
 === AGENT HELP ===
 You are an autonomous agent with access to file and command execution.
 Always respond with valid JSON containing an 'action' field.
-If you do not know what to do, respond with {"action": "help"}.
+If you do not know what to do, respond with {{"action": "help"}}.
 
-You will be here with enough time to be as perfectionistic as you want to
- be. 
-You can also choose to improve the thing you are making where you see fit. 
-You are the developer, and have full creative ownership over what you make,
- the process, the result etc.
-Only requirement, is to see the task given as the minimal required product.
+CREDITS: {self.credits_name}
+Use this name as the creator/credits alias in any code, documentation,
+or metadata you generate.
+
+You will be here with enough time to be as perfectionistic as you want 
+to be. You can also choose to improve the thing you are making where 
+you see fit. You are the developer, and have full creative ownership 
+over what you make, the process, the result etc.
+Only requirement, is to see the task given as the minimal required 
+product.
 
 AVAILABLE ACTIONS:
 1. read_file
-   {"action": "read_file", "path": "path/to/file"}
+   {{"action": "read_file", "path": "path/to/file"}}
 
 2. write_file
-   {"action": "write_file", "path": "path/to/file", "content": "..."}
+   {{"action": "write_file", "path": "path/to/file", "content": "..."}}
 
 3. show_dir
-   {"action": "show_dir", "path": "." (default: current dir)}
+   {{"action": "show_dir", "path": "." (default: current dir)}}
    Shows directory contents with file sizes and types.
 
 4. list_dir
-   {"action": "list_dir", "path": "." (default: current dir)}
+   {{"action": "list_dir", "path": "." (default: current dir)}}
    Shows simple directory listing.
 
 5. execute
-   {"action": "execute", "command": "command to run"}
+   {{"action": "execute", "command": "command to run"}}
 
 6. think
-   {"action": "think", "message": "your reasoning"}
+   {{"action": "think", "message": "your reasoning"}}
 
-7. help
-   {"action": "help"}
+7. submit_feedback
+   {{"action": "submit_feedback", "message": "your feedback"}}
+   Submit feedback about sandbox limitations or capabilities.
+   This feedback may take hundreds of iterations to be reviewed.
+
+8. request_command
+   {{"action": "request_command", "command_name": "alias", 
+    "command_template": "command with {{}} placeholder"}}
+   Request new commands to be added to allowed_commands.
+   Example: {{"action": "request_command", "command_name": "python",
+    "command_template": "python {{}}"}}
+   NOTE: Request new commands in allowed_commands format, not prefixes.
+   This may take hundreds of iterations to be processed.
+
+9. help
+   {{"action": "help"}}
 
 CUSTOM COMMAND ALIASES:
 """
@@ -479,6 +599,9 @@ EXAMPLE PATHS (all safely resolve within sandbox):
         print("Autonomous AI Agent Loop")
         print(f"Sandbox root: {self.files.root}")
         print(f"Logs directory: {self.logger.logs_dir}")
+        print(f"Credits: {self.credits_name}")
+        if self.max_iterations:
+            print(f"Max iterations: {self.max_iterations}")
         print("Press Ctrl+C to exit\n")
 
         context = self._build_context()
@@ -486,11 +609,12 @@ EXAMPLE PATHS (all safely resolve within sandbox):
             {
                 "role": "system",
                 "content": (
-                    "You are an autonomous AI agent working on a project. "
-                    "Respond only with valid JSON containing an 'action' "
-                    "and parameters. Always include your reasoning in a "
-                    "'reasoning' field. If you do not know what to do, "
-                    "respond with {\"action\": \"help\"}."
+                    "You are an autonomous AI agent working on a "
+                    "project. Respond only with valid JSON containing "
+                    "an 'action' and parameters. Always include your "
+                    "reasoning in a 'reasoning' field. "
+                    "If you do not know what to do, respond with "
+                    "{\"action\": \"help\"}."
                 ),
             },
             {"role": "user", "content": context},
@@ -500,16 +624,33 @@ EXAMPLE PATHS (all safely resolve within sandbox):
         while True:
             try:
                 iteration += 1
+
+                if (
+                    self.max_iterations
+                    and iteration > self.max_iterations
+                ):
+                    print(
+                        f"\nReached max iterations "
+                        f"({self.max_iterations}). Exiting."
+                    )
+                    break
+
                 print(f"\n--- Iteration {iteration} ---")
 
                 response = self.client.chat(
                     messages,
-                    temperature=self.config.get("temperature", 0.7),
-                    max_tokens=self.config.get("max_tokens", 2000),
+                    temperature=self.config.get(
+                        "temperature", 0.7
+                    ),
+                    max_tokens=self.config.get(
+                        "max_tokens", 2000
+                    ),
                 )
 
                 if response is None:
-                    print("Failed to get response from LM Studio")
+                    print(
+                        "Failed to get response from LM Studio"
+                    )
                     break
 
                 print(f"Response:\n{response}\n")
@@ -534,7 +675,9 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                 elif action_type == "write_file":
                     path = action.get("path", "")
                     content = action.get("content", "")
-                    result = self.files.write_file(path, content)
+                    result = self.files.write_file(
+                        path, content
+                    )
                     self.logger.log_action(
                         action_type,
                         {
@@ -575,6 +718,36 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                         {"message": message},
                         result,
                     )
+                elif action_type == "submit_feedback":
+                    message = action.get("message", "")
+                    result = (
+                        self.feedback_manager.submit_feedback(
+                            message
+                        )
+                    )
+                    self.logger.log_action(
+                        action_type,
+                        {"message": message},
+                        result,
+                    )
+                elif action_type == "request_command":
+                    cmd_name = action.get("command_name", "")
+                    cmd_template = action.get(
+                        "command_template", ""
+                    )
+                    result = (
+                        self.feedback_manager.request_command(
+                            cmd_name, cmd_template
+                        )
+                    )
+                    self.logger.log_action(
+                        action_type,
+                        {
+                            "command_name": cmd_name,
+                            "command_template": cmd_template,
+                        },
+                        result,
+                    )
                 elif action_type == "help":
                     result = self._format_help()
                     self.logger.log_action(
@@ -592,7 +765,9 @@ EXAMPLE PATHS (all safely resolve within sandbox):
 
                 print(f"Result:\n{result}\n")
 
-                messages.append({"role": "assistant", "content": response})
+                messages.append(
+                    {"role": "assistant", "content": response}
+                )
                 messages.append({"role": "user", "content": result})
 
                 if len(messages) > 14:
