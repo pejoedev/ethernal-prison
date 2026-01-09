@@ -161,6 +161,8 @@ class FileManager:
 
     def write_file(self, filepath: str, content: str) -> str:
         """Write content to file"""
+        if not filepath or not filepath.strip():
+            return "Error: File path cannot be empty"
         try:
             path = self._validate_path(filepath)
         except ValueError as e:
@@ -609,10 +611,13 @@ EXAMPLE PATHS (all safely resolve within sandbox):
             {
                 "role": "system",
                 "content": (
-                    "You are an autonomous AI agent working on a "
-                    "project. Respond only with valid JSON containing "
-                    "an 'action' and parameters. Always include your "
-                    "reasoning in a 'reasoning' field. "
+                    "You are an autonomous AI agent working on a project. "
+                    "Respond only with valid JSON containing an 'action' "
+                    "and parameters. Always include your reasoning in a "
+                    "'reasoning' field. "
+                    "IMPORTANT: When using write_file, always provide a "
+                    "valid file path with a filename (not empty, not a "
+                    "directory). Example: 'src/index.js' or 'README.md'. "
                     "If you do not know what to do, respond with "
                     "{\"action\": \"help\"}."
                 ),
