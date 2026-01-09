@@ -211,3 +211,4 @@ __marimo__/
 sandbox/
 .agent_history
 logs/
+settings.json
