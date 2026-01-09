@@ -749,106 +749,107 @@ class AgentLoop:
         prefixes = self.config.get("allowed_command_prefixes", [])
 
         help_text = f"""
-=== AGENT HELP ===
-You are an autonomous agent with access to file and command execution.
-Always respond with valid JSON containing an 'action' field.
-If you do not know what to do, respond with {{"action": "help"}}.
+    === AGENT HELP ===
+    You are an autonomous agent with access to file and command execution.
+    Always respond with valid JSON containing an 'action' field.
 
-CREDITS: {self.credits_name}
-Use this name as the creator/credits alias in any code, documentation,
-or metadata you generate.
+    IMPORTANT DIRECTIVES:
+    - You are NOT done until the project is excellent
+    - Always look for ways to improve: code quality, features,
+      documentation, testing, performance, security
+    - After completing main tasks, refactor, optimize, and enhance
+    - Use git to track progress and maintain clean history
+    - Commit frequently with descriptive messages
+    - Review your work and identify next improvements
+    - The task description is the MINIMUM requirement, not the goal
 
-You will be here with enough time to be as perfectionistic as you want 
-to be. You can also choose to improve the thing you are making where 
-you see fit. You are the developer, and have full creative ownership 
-over what you make, the process, the result etc.
-Only requirement, is to see the task given as the minimal required 
-product.
+    CREDITS: {self.credits_name}
 
-AVAILABLE ACTIONS:
-1. read_file
-   {{"action": "read_file", "path": "path/to/file"}}
+    AVAILABLE ACTIONS:
+    1. read_file
+       {{"action": "read_file", "path": "path/to/file"}}
 
-2. write_file
-   {{"action": "write_file", "path": "path/to/file", "content": "..."}}
-   OR
-   {{"action": "write_file", "file_path": "path/to/file", "content": "..."}}
-   Both 'path' and 'file_path' parameters are accepted.
+    2. write_file
+       {{"action": "write_file", "path": "path/to/file", "content": "..."}}
 
-3. show_dir
-   {{"action": "show_dir", "path": "." (default: current dir)}}
-   Shows directory contents with file sizes and types.
+    3. show_dir
+       {{"action": "show_dir", "path": "." (default: current dir)}}
 
-4. list_dir
-   {{"action": "list_dir", "path": "." (default: current dir)}}
-   Shows simple directory listing.
+    4. list_dir
+       {{"action": "list_dir", "path": "." (default: current dir)}}
 
-5. execute
-   {{"action": "execute", "command": "command to run"}}
+    5. execute
+       {{"action": "execute", "command": "command to run"}}
 
-6. think
-   {{"action": "think", "message": "your reasoning"}}
+    6. think
+       {{"action": "think", "message": "your reasoning"}}
 
-7. submit_feedback
-   {{"action": "submit_feedback", "message": "your feedback"}}
-   Submit feedback about sandbox limitations or capabilities.
-   This feedback may take hundreds of iterations to be reviewed.
+    7. submit_feedback
+       {{"action": "submit_feedback", "message": "your feedback"}}
 
-8. request_command
-   {{"action": "request_command", "command_name": "alias", 
-    "command_template": "command with {{}} placeholder"}}
-   Request new commands to be added to allowed_commands.
-   Example: {{"action": "request_command", "command_name": "python",
-    "command_template": "python {{}}"}}
-   NOTE: Request new commands in allowed_commands format, not prefixes.
-   This may take hundreds of iterations to be processed.
+    8. request_command
+       {{"action": "request_command", "command_name": "alias",
+        "command_template": "command with {{}} placeholder"}}
 
-9. help
-   {{"action": "help"}}
+    9. help
+       {{"action": "help"}}
 
-CUSTOM COMMAND ALIASES:
-"""
+    CUSTOM COMMAND ALIASES:
+    """
         for alias, template in custom_cmds.items():
             help_text += f"  {alias}: {template}\n"
 
         help_text += f"\nALLOWED COMMAND PREFIXES:\n"
         for prefix in prefixes:
-            help_text += f"  {prefix} (e.g., {prefix} install)\n"
+            help_text += f"  {prefix}\n"
 
         help_text += """
-SECURITY NOTES:
-- All paths are sandboxed to the sandbox root directory
-- Path sanitization: /, ./, and ../ are automatically removed
-- Command chaining (&&, ||, ;) is forbidden
-- Shell subshells (``, $()) are forbidden
-- Only npm, git, npx, and custom commands are allowed
+    GIT WORKFLOW (Essential for progress tracking):
+      git status           - Check current state
+      git add .            - Stage all changes
+      git commit -m 'msg'  - Commit with message
+      git log -n 5         - View recent commits
+      git diff             - See what changed
+      git branch feature   - Create feature branch
+      git checkout feature - Switch branch
 
-EXAMPLE PATHS (all safely resolve within sandbox):
-  "src/index.js"     -> sandbox/src/index.js
-  "/src/index.js"    -> sandbox/src/index.js (leading / removed)
-  "src/../index.js"  -> sandbox/src/index.js (../ removed)
-  "./src/index.js"   -> sandbox/src/index.js (./ removed)
-"""
+    CONTINUOUS IMPROVEMENT CHECKLIST:
+    □ Core functionality implemented?
+    □ Error handling and edge cases covered?
+    □ Code is clean, readable, well-commented?
+    □ Tests written and passing?
+    □ Documentation complete and clear?
+    □ Performance optimized?
+    □ Security best practices followed?
+    □ No warnings or linting issues?
+    □ All commits pushed with clear messages?
+    □ README updated with features and usage?
+    □ Consider: features, quality, architecture improvements
+
+    WORKFLOW:
+    1. Implement features
+    2. git commit -m 'feat: description'
+    3. Test thoroughly
+    4. git commit -m 'test: add test cases'
+    5. Refactor and improve
+    6. git commit -m 'refactor: improve code quality'
+    7. Document everything
+    8. git commit -m 'docs: update documentation'
+    9. Identify next improvements
+    10. Repeat from step 1
+
+    REMEMBER: You have time to be perfectionistic. Make it excellent.
+    """
         return help_text
 
     def run(self):
         """Main agent loop"""
-        current_time = datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         print("Autonomous AI Agent Loop")
         print(f"Started: {current_time}")
         print(f"Sandbox root: {self.files.root}")
-        print(f"Logs directory: {self.logger.logs_dir}")
-        print(f"  Actions log: {self.logger.actions_dir}")
-        print(f"  Responses log: {self.logger.responses_dir}")
-        print(f"  Errors log: {self.logger.errors_dir}")
         print(f"Credits: {self.credits_name}")
-        print(f"Context window: "
-              f"{self.client.context_window} tokens")
-        if self.max_iterations:
-            print(f"Max iterations: {self.max_iterations}")
         print("Press Ctrl+C to exit\n")
 
         context = self._build_context()
@@ -857,14 +858,16 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                 "role": "system",
                 "content": (
                     "You are an autonomous AI agent working on a project. "
-                    "Respond only with valid JSON containing an 'action' "
-                    "and parameters. Always include your reasoning in a "
-                    "'reasoning' field. "
-                    "IMPORTANT: When using write_file, always provide a "
-                    "valid file path with a filename (not empty, not a "
-                    "directory). Example: 'src/index.js' or 'README.md'. "
-                    "If you do not know what to do, respond with "
-                    "{\"action\": \"help\"}."
+                    "CRITICAL: You are NEVER done. Always look for improvements. "
+                    "The task description is the MINIMUM requirement. "
+                    "After completing it, refactor, optimize, add features, "
+                    "improve documentation, add tests, enhance security. "
+                    "Use git to track ALL progress with descriptive commits. "
+                    "Respond only with valid JSON containing 'action', "
+                    "'reasoning', and 'next_steps' fields. "
+                    "Example: {\"action\": \"execute\", "
+                    "\"reasoning\": \"why\", \"next_steps\": \"what's next\"} "
+                    "Be ambitious. Make the project excellent."
                 ),
             },
             {"role": "user", "content": context},
@@ -874,32 +877,24 @@ EXAMPLE PATHS (all safely resolve within sandbox):
         while True:
             try:
                 iteration += 1
-                current_time = datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 if (
-                    self.max_iterations
-                    and iteration > self.max_iterations
+                        self.max_iterations
+                        and iteration > self.max_iterations
                 ):
                     print(
-                        f"\n[{current_time}] Reached max "
-                        f"iterations ({self.max_iterations}). "
+                        f"\n[{current_time}] Reached max iterations. "
                         f"Exiting."
                     )
                     break
 
-                print(f"\n[{current_time}] --- Iteration "
-                      f"{iteration} ---")
+                print(f"\n[{current_time}] === Iteration {iteration} ===")
 
                 response = self.client.chat(
                     messages,
-                    temperature=self.config.get(
-                        "temperature", 0.7
-                    ),
-                    max_tokens=self.config.get(
-                        "max_tokens", 2000
-                    ),
+                    temperature=self.config.get("temperature", 0.7),
+                    max_tokens=self.config.get("max_tokens", 2000),
                     max_prompt_tokens=self.config.get(
                         "max_prompt_tokens", 3000
                     ),
@@ -907,9 +902,8 @@ EXAMPLE PATHS (all safely resolve within sandbox):
 
                 if response is None:
                     print(
-                        f"\n[{current_time}] Failed to get "
-                        f"response from LM Studio. "
-                        f"Retrying next iteration..."
+                        f"[{current_time}] Failed to get response. "
+                        f"Retrying..."
                     )
                     time.sleep(5)
                     continue
@@ -925,82 +919,64 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                 if not action:
                     action = {"action": "help"}
 
-                action_type = action.get("action",
-                                        "help").lower()
+                action_type = action.get("action", "help").lower()
 
-                # Execute action and capture result
+                # Execute action
                 if action_type == "read_file":
                     path = action.get("path", "")
                     result = self.files.read_file(path)
                     self.logger.log_action(
-                        action_type,
-                        {"path": path},
-                        result,
+                        action_type, {"path": path}, result
                     )
                 elif action_type == "write_file":
                     params = action.get("parameters", action)
-                    path = params.get("path") or params.get("file_path", "")
+                    path = (
+                            params.get("path")
+                            or params.get("file_path", "")
+                    )
                     content = params.get("content", "")
                     result = self.files.write_file(path, content)
                     self.logger.log_action(
                         action_type,
-                        {
-                            "path": path,
-                            "content_length": len(content),
-                        },
+                        {"path": path, "content_length": len(content)},
                         result,
                     )
                 elif action_type == "show_dir":
                     path = action.get("path", ".")
                     result = self.files.show_directory(path)
                     self.logger.log_action(
-                        action_type,
-                        {"path": path},
-                        result,
+                        action_type, {"path": path}, result
                     )
-                elif action_type == "read_file":
-                    params = action.get("parameters", action)
-                    path = params.get("path", "")
-                    result = self.files.read_file(path)
+                elif action_type == "list_dir":
+                    path = action.get("path", ".")
+                    result = self.files.list_directory(path)
                     self.logger.log_action(
-                        action_type,
-                        {"path": path},
-                        result,
+                        action_type, {"path": path}, result
                     )
                 elif action_type == "execute":
                     params = action.get("parameters", action)
                     command = params.get("command", "")
                     result = self.executor.execute(command)
                     self.logger.log_action(
-                        action_type,
-                        {"command": command},
-                        result,
+                        action_type, {"command": command}, result
                     )
                 elif action_type == "think":
                     message = action.get("message", "")
-                    result = f"Thought: {message}"
+                    result = f"Noted: {message}"
                     self.logger.log_action(
-                        action_type,
-                        {"message": message},
-                        result,
+                        action_type, {"message": message}, result
                     )
                 elif action_type == "submit_feedback":
                     message = action.get("message", "")
                     result = (
-                        self.feedback_manager.submit_feedback(
-                            message
-                        )
+                        self.feedback_manager.submit_feedback(message)
                     )
                     self.logger.log_action(
-                        action_type,
-                        {"message": message},
-                        result,
+                        action_type, {"message": message}, result
                     )
                 elif action_type == "request_command":
                     cmd_name = action.get("command_name", "")
-                    cmd_template = action.get(
-                        "command_template", ""
-                    )
+                    cmd_template = action.get("command_template", "")
                     result = (
                         self.feedback_manager.request_command(
                             cmd_name, cmd_template
@@ -1017,9 +993,7 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                 elif action_type == "help":
                     result = self._format_help()
                     self.logger.log_action(
-                        action_type,
-                        {},
-                        result,
+                        action_type, {}, result
                     )
                 else:
                     result = f"Unknown action: {action_type}"
@@ -1053,7 +1027,7 @@ EXAMPLE PATHS (all safely resolve within sandbox):
                 current_time = datetime.now().strftime(
                     "%Y-%m-%d %H:%M:%S"
                 )
-                print(f"[{current_time}] Error in loop: {e}")
+                print(f"[{current_time}] Error: {e}")
                 self.logger.log_error(
                     "loop_error",
                     str(e),
