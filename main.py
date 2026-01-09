@@ -570,6 +570,102 @@ class LMStudioClient:
         return None
 
 
+class CommandValidator:
+    """Validate and provide feedback on invalid commands"""
+
+    def __init__(
+        self,
+        client: LMStudioClient,
+        config: AgentConfig,
+        logger: Logger,
+    ):
+        self.client = client
+        self.config = config
+        self.logger = logger
+
+    def validate_command(
+        self, command: str, error_message: str
+    ) -> dict:
+        """Get AI feedback on why command failed and suggestions"""
+        custom_cmds = self.config.get("allowed_commands", {})
+        allowed_prefixes = self.config.get(
+            "allowed_command_prefixes", []
+        )
+
+        context = f"""
+You are a command validation assistant. An AI agent tried to execute a
+command but it failed or was rejected.
+
+Command attempted: {command}
+Error message: {error_message}
+
+Available command aliases:
+{json.dumps(custom_cmds, indent=2)}
+
+Allowed command prefixes: {', '.join(allowed_prefixes)}
+
+Analyze the command and provide:
+1. What went wrong (be specific)
+2. Why it was rejected or failed
+3. A corrected command suggestion
+4. An explanation of the suggested fix
+
+Respond with valid JSON:
+{{
+  "issue": "specific explanation of the problem",
+  "reason": "why it failed",
+  "suggested_command": "corrected command",
+  "explanation": "explanation of the fix"
+}}
+"""
+
+        messages = [
+            {"role": "user", "content": context}
+        ]
+
+        response = self.client.chat(
+            messages,
+            temperature=0.3,
+            max_tokens=500,
+            max_prompt_tokens=1000,
+        )
+
+        if not response:
+            return {
+                "issue": "Unable to get feedback",
+                "reason": "AI service unavailable",
+                "suggested_command": None,
+                "explanation": "Could not reach feedback service",
+            }
+
+        try:
+            start = response.find("{")
+            end = response.rfind("}") + 1
+            if start != -1 and end > start:
+                json_str = response[start:end]
+                result = json.loads(json_str)
+                self.logger.log_action(
+                    "command_validation",
+                    {
+                        "original_command": command,
+                        "error": error_message,
+                    },
+                    json.dumps(result),
+                )
+                return result
+        except json.JSONDecodeError:
+            pass
+
+        return {
+            "issue": "Could not parse feedback",
+            "reason": "Feedback parsing error",
+            "suggested_command": None,
+            "explanation": (
+                "The feedback could not be properly formatted"
+            ),
+        }
+
+
 class FeedbackManager:
     """Manage AI feedback and command requests"""
 
@@ -676,6 +772,9 @@ class AgentLoop:
                 "context_window", 4096
             ),
             logger=self.logger,
+        )
+        self.validator = CommandValidator(
+            self.client, self.config, self.logger
         )
         self.feedback_manager = FeedbackManager(sandbox_root)
         self.history_file = Path(sandbox_root) / ".agent_history"
@@ -941,6 +1040,28 @@ class AgentLoop:
                     params = action.get("parameters", action)
                     command = params.get("command", "")
                     result = self.executor.execute(command)
+
+                    if result.startswith("Error:"):
+                        print(
+                            f"[{current_time}] Command validation "
+                            f"triggered"
+                        )
+                        validation_feedback = (
+                            self.validator.validate_command(
+                                command, result
+                            )
+                        )
+                        result = (
+                            f"{result}\n\n"
+                            f"=== VALIDATION FEEDBACK ===\n"
+                            f"Issue: {validation_feedback.get('issue')}\n"
+                            f"Reason: {validation_feedback.get('reason')}\n"
+                            f"Suggested: "
+                            f"{validation_feedback.get('suggested_command')}\n"
+                            f"Explanation: "
+                            f"{validation_feedback.get('explanation')}\n"
+                        )
+
                     self.logger.log_action(
                         action_type, {"command": command}, result
                     )
